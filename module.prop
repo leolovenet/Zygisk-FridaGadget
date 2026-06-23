@@ -4,3 +4,4 @@ version=0.1.0
 versionCode=1
 author=leolovenet
 description=Configurable Zygisk loader for Frida Gadget
+updateJson=https://raw.githubusercontent.com/leolovenet/Zygisk-FridaGadget/main/update.json

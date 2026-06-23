@@ -219,6 +219,24 @@ By default, missing Gadget binaries or config files produce warnings so you can 
 STRICT_BUILD=1 ./build.sh
 ```
 
+## Updates
+
+Magisk-compatible module managers can check for updates when `module.prop` contains:
+
+```text
+updateJson=https://raw.githubusercontent.com/leolovenet/Zygisk-FridaGadget/main/update.json
+```
+
+The update metadata is published in `update.json` and points to the release zip attached to the matching GitHub release tag. When releasing a new version, update these values together:
+
+```text
+module.prop: version, versionCode
+update.json: version, versionCode, zipUrl
+CHANGELOG.md: release notes
+```
+
+Then build and upload `out/zygisk_frida_gadget.zip` to a GitHub release whose tag matches the `zipUrl`.
+
 ## Install
 
 Install in Magisk:
