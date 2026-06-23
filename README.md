@@ -53,9 +53,11 @@ After decompressing, keep the version in the source filename if you like:
 ```text
 gadget/
   arm64-v8a/
+    .gitkeep
     libgadget-17.15.3.so
     libgadget.so -> libgadget-17.15.3.so
   armeabi-v7a/
+    .gitkeep
     libgadget-17.15.3.so
     libgadget.so -> libgadget-17.15.3.so
 libgadget.config.so
@@ -68,6 +70,8 @@ libgadget.so
 ```
 
 Keeping the deployed filename stable is intentional: Frida Gadget discovers `libgadget.config.so` next to the loaded `libgadget.so`.
+
+The `.gitkeep` files only keep the ABI directories present after cloning the repository. They are not used at runtime.
 
 The source filename may also be plain:
 
