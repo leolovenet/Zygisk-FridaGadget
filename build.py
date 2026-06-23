@@ -48,6 +48,7 @@ def check_inputs(root_dir):
     ]
     config_paths = [
         root_dir / "libgadget.config.so",
+        root_dir / "libgadget.config.so.example",
         root_dir / "gadget/arm64-v8a/libgadget.config.so",
         root_dir / "gadget/armeabi-v7a/libgadget.config.so",
     ]
@@ -129,8 +130,9 @@ def stage_files(root_dir, build_dir):
         ("action.sh", "action.sh"),
         ("uninstall.sh", "uninstall.sh"),
         ("deploy_gadget.sh", "deploy_gadget.sh"),
-        ("module.conf", "module.conf"),
-        ("targets.conf", "targets.conf"),
+        ("module.conf.example", "module.conf.example"),
+        ("targets.conf.example", "targets.conf.example"),
+        ("libgadget.config.so.example", "libgadget.config.so.example"),
         ("META-INF/com/google/android/updater-script", "META-INF/com/google/android/updater-script"),
         ("META-INF/com/google/android/update-binary", "META-INF/com/google/android/update-binary"),
     ]
@@ -147,7 +149,7 @@ def stage_files(root_dir, build_dir):
         if src.exists() or src.is_symlink():
             copy_file(src, build_dir / optional)
 
-    for name in ("module.prop", "module.conf", "targets.conf"):
+    for name in ("module.prop", "module.conf.example", "targets.conf.example", "libgadget.config.so.example"):
         os.chmod(build_dir / name, 0o644)
 
     for name in ("customize.sh", "service.sh", "action.sh", "uninstall.sh", "deploy_gadget.sh"):
@@ -175,8 +177,9 @@ def zip_entries(build_dir):
         "action.sh",
         "uninstall.sh",
         "deploy_gadget.sh",
-        "module.conf",
-        "targets.conf",
+        "module.conf.example",
+        "targets.conf.example",
+        "libgadget.config.so.example",
         "zygisk/armeabi-v7a.so",
         "zygisk/arm64-v8a.so",
     ]

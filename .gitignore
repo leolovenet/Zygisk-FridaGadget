@@ -6,5 +6,8 @@ module/libs/
 *.d
 __pycache__/
 *.pyc
+targets.conf
+module.conf
+libgadget.config.so
 libgadget.so
 gadget/**/*.so

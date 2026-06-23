@@ -116,6 +116,8 @@ gadget/armeabi-v7a/libgadget.config.so
 
 ABI-specific config wins over the root config.
 
+The repository tracks `libgadget.config.so.example` as the default template. During installation, `customize.sh` creates `libgadget.config.so` from that template only when the real config file does not already exist.
+
 ## Configure Targets
 
 Edit `targets.conf`:
@@ -182,6 +184,16 @@ The `abi` field is optional. If omitted, it defaults to `auto`:
 com.example.app|com.example.app|exact
 ```
 
+The repository tracks `targets.conf.example` and `module.conf.example`. During installation, the module creates real runtime files from these examples only on first install:
+
+```text
+targets.conf
+module.conf
+libgadget.config.so
+```
+
+On module updates, existing runtime config files are preserved before the new zip is extracted and restored afterward.
+
 ## Debug Logging
 
 Edit `module.conf`:
@@ -219,6 +231,34 @@ By default, missing Gadget binaries or config files produce warnings so you can 
 STRICT_BUILD=1 ./build.sh
 ```
 
+## Release
+
+Use `release.py` to keep version metadata and release packaging in sync:
+
+```bash
+./release.py 0.1.1 2
+```
+
+This updates:
+
+```text
+module.prop
+update.json
+CHANGELOG.md
+```
+
+and runs the deterministic build. Review the changes, commit them, and push `main`. Then publish the GitHub release and upload the built module zip:
+
+```bash
+./release.py 0.1.1 2 --publish
+```
+
+Release builds use strict mode by default and require Gadget binaries/config to be present. For development-only packaging without Gadget binaries:
+
+```bash
+./release.py 0.1.1 2 --allow-missing-gadget
+```
+
 ## Updates
 
 Magisk-compatible module managers can check for updates when `module.prop` contains:
@@ -236,6 +276,16 @@ CHANGELOG.md: release notes
 ```
 
 Then build and upload `out/zygisk_frida_gadget.zip` to a GitHub release whose tag matches the `zipUrl`.
+
+User-edited runtime config files are intentionally not replaced by automatic updates:
+
+```text
+targets.conf
+module.conf
+libgadget.config.so
+```
+
+New defaults are shipped as `.example` files. If you add new configuration options in a release, document them in the changelog so users can merge them into their existing configs if needed.
 
 ## Install
 
