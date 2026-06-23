@@ -22,6 +22,12 @@ Current build output:
 out/zygisk_frida_gadget.zip
 ```
 
+Current release helper:
+
+```text
+release.py
+```
+
 ## Goal
 
 Build a reusable open-source Zygisk-based Frida Gadget injection method for devices where running `frida-server` directly is not practical.
@@ -43,6 +49,14 @@ Runtime target configuration uses a simple pipe-delimited file:
 ```text
 targets.conf
 ```
+
+The repository tracks the default template as:
+
+```text
+targets.conf.example
+```
+
+`customize.sh` creates `targets.conf` from this template only on first install. During updates, existing runtime config files are preserved before the module zip is extracted and restored afterward.
 
 Format:
 
@@ -86,6 +100,14 @@ gadget/
     libgadget.so -> libgadget-<version>.so
 libgadget.config.so
 ```
+
+The repository tracks:
+
+```text
+libgadget.config.so.example
+```
+
+The real runtime `libgadget.config.so` is ignored by git and is created from the example only when absent.
 
 The source filename may keep the Frida version, for example:
 
@@ -138,7 +160,15 @@ deploy_gadget.sh
    - executable mode for `libgadget.so`
    - SELinux context
 8. Writes deployment details to `deploy.log`.
-9. Does not write loader state. `targets.conf` is the single source of truth.
+9. Force-stops successfully deployed packages when `force_stop=1`.
+10. Does not write loader state. `targets.conf` is the single source of truth.
+
+Automatic force-stop details:
+
+- `module.conf.example` defaults to `force_stop=1`.
+- Install and manual Action redeploy flows allow force-stop.
+- `service.sh` passes `deploy_gadget "$MODDIR" "0"` so boot-time deployment does not kill apps silently.
+- Only packages with successful deployment are force-stopped, and each package is force-stopped once.
 
 `uninstall.sh` removes deployed Gadget files from configured target app native library directories when the Magisk module is removed.
 
@@ -148,7 +178,13 @@ After editing `targets.conf`, the C++ loader sees the new config when the target
 adb shell su -c '/data/adb/modules/zygisk_frida_gadget/action.sh'
 ```
 
-then force-stop and restart the target app.
+By default, successful redeploy force-stops the target package automatically. Users can disable this with:
+
+```text
+force_stop=0
+```
+
+in `module.conf`.
 
 ## Zygisk Loader Flow
 
@@ -181,16 +217,20 @@ dlopen(payload_path, RTLD_NOW | RTLD_GLOBAL);
 
 Because `payload_path` points into the target app native library directory, Frida Gadget can read `libgadget.config.so` from the same directory.
 
-If the process already has the configured payload path, `libgadget.so`, or a versioned `libgadget-*.so` mapped, the loader logs `payload already loaded, skip dlopen` and skips loading.
+If the process already has the configured payload path mapped, the loader logs `payload already loaded, skip dlopen` and skips loading.
 
 `module.conf` currently supports:
 
 ```text
 debug=0
 debug=1
+force_stop=0
+force_stop=1
 ```
 
 Debug mode controls noisy non-target process logs. Target matches, load attempts, and errors are always logged.
+
+`force_stop` is consumed by `deploy_gadget.sh`, not the native loader.
 
 ## Important Lessons Learned
 
@@ -290,7 +330,119 @@ Current build script:
 - Cleans old `module/obj` and `module/libs`.
 - Builds `armeabi-v7a` and `arm64-v8a`.
 - Packages `zygisk/armeabi-v7a.so` and `zygisk/arm64-v8a.so`.
-- Packages `targets.conf`, deploy scripts, and Gadget files.
+- Packages deploy scripts, `.example` config templates, and Gadget files.
+- Does not package real runtime config files:
+  - `targets.conf`
+  - `module.conf`
+  - `libgadget.config.so`
+
+## Release Procedure
+
+Use `release.py`; do not hand-edit release metadata unless there is a specific reason.
+
+Release metadata lives in:
+
+```text
+module.prop
+update.json
+CHANGELOG.md
+```
+
+For a normal release:
+
+```bash
+./release.py <version> <versionCode>
+```
+
+Example:
+
+```bash
+./release.py 0.1.2 3
+```
+
+This command:
+
+- Updates `module.prop`:
+  - `version`
+  - `versionCode`
+- Updates `update.json`:
+  - `version`
+  - `versionCode`
+  - `zipUrl`
+  - `changelog`
+- Ensures `CHANGELOG.md` has a section for the version.
+- Runs the deterministic build and writes `out/zygisk_frida_gadget.zip`.
+
+Before publishing:
+
+1. Replace any generated TODO release notes in `CHANGELOG.md`.
+2. Run syntax checks:
+
+```bash
+bash -n build.sh
+bash -n customize.sh
+bash -n deploy_gadget.sh
+bash -n service.sh
+python3 -m py_compile build.py release.py
+python3 -m json.tool update.json
+```
+
+3. Verify the zip contains examples, not real runtime configs:
+
+```bash
+python3 - <<'PY'
+import zipfile
+with zipfile.ZipFile('out/zygisk_frida_gadget.zip') as z:
+    names = set(z.namelist())
+    for name in [
+        'targets.conf',
+        'module.conf',
+        'libgadget.config.so',
+        'targets.conf.example',
+        'module.conf.example',
+        'libgadget.config.so.example',
+    ]:
+        print(f'{name}:', 'yes' if name in names else 'no')
+PY
+```
+
+Expected:
+
+```text
+targets.conf: no
+module.conf: no
+libgadget.config.so: no
+targets.conf.example: yes
+module.conf.example: yes
+libgadget.config.so.example: yes
+```
+
+4. Commit and push `main`.
+5. Publish the GitHub release:
+
+```bash
+./release.py <version> <versionCode> --publish
+```
+
+`--publish` requires:
+
+- clean working tree
+- local `HEAD` pushed to upstream
+- `gh` installed and authenticated
+
+The release script creates a tag named `v<version>` and uploads:
+
+```text
+out/zygisk_frida_gadget.zip
+```
+
+Development-only builds without Gadget binaries can use:
+
+```bash
+./release.py <version> <versionCode> --allow-missing-gadget
+```
+
+Do not use `--allow-missing-gadget` for official releases unless intentionally publishing a loader-only package.
 
 ## Useful Commands
 
