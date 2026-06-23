@@ -2,17 +2,24 @@
 
 SKIPUNZIP=1
 CONFIG_BACKUP="$MODPATH/.config-backup"
-CONFIG_FILES="targets.conf module.conf libgadget.config.so"
+CONFIG_FILES="targets.conf module.conf libgadget.config.so gadget/arm64-v8a/libgadget.config.so gadget/armeabi-v7a/libgadget.config.so"
+LIVE_MODPATH="/data/adb/modules/zygisk_frida_gadget"
 
 backup_user_config() {
-  local file
+  local file source_dir
 
   rm -rf "$CONFIG_BACKUP" 2>/dev/null
   mkdir -p "$CONFIG_BACKUP" 2>/dev/null
 
+  source_dir="$LIVE_MODPATH"
+  [ -d "$source_dir" ] || source_dir="$MODPATH"
+
   for file in $CONFIG_FILES; do
-    [ -e "$MODPATH/$file" ] || continue
-    cp -af "$MODPATH/$file" "$CONFIG_BACKUP/$file" 2>/dev/null
+    [ -e "$source_dir/$file" ] || continue
+    case "$file" in
+      */*) mkdir -p "$CONFIG_BACKUP/${file%/*}" 2>/dev/null ;;
+    esac
+    cp -af "$source_dir/$file" "$CONFIG_BACKUP/$file" 2>/dev/null
   done
 }
 
@@ -21,6 +28,9 @@ restore_or_create_config() {
 
   for file in $CONFIG_FILES; do
     if [ -e "$CONFIG_BACKUP/$file" ]; then
+      case "$file" in
+        */*) mkdir -p "$MODPATH/${file%/*}" 2>/dev/null ;;
+      esac
       cp -af "$CONFIG_BACKUP/$file" "$MODPATH/$file" 2>/dev/null
       ui_print "- Preserved existing $file"
     elif [ ! -e "$MODPATH/$file" ] && [ -e "$MODPATH/$file.example" ]; then

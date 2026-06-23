@@ -118,6 +118,8 @@ ABI-specific config wins over the root config.
 
 The repository tracks `libgadget.config.so.example` as the default template. During installation, `customize.sh` creates `libgadget.config.so` from that template only when the real config file does not already exist.
 
+During module updates or local reinstalls, existing root and ABI-specific Gadget config files are preserved.
+
 ## Configure Targets
 
 Edit `targets.conf`:
@@ -244,7 +246,7 @@ STRICT_BUILD=1 ./build.sh
 Use `release.py` to keep version metadata and release packaging in sync:
 
 ```bash
-./release.py 0.1.1 2
+./release.py <version> <versionCode>
 ```
 
 This updates:
@@ -258,13 +260,21 @@ CHANGELOG.md
 and runs the deterministic build. Review the changes, commit them, and push `main`. Then publish the GitHub release and upload the built module zip:
 
 ```bash
-./release.py 0.1.1 2 --publish
+./release.py <version> <versionCode> --publish
 ```
+
+`release.py` validates the generated zip before publishing: runtime config files must stay out of the release package, `.example` config files must be present, and both Zygisk ABI loaders must be included. GitHub release notes are generated from the matching `CHANGELOG.md` version section.
 
 Release builds use strict mode by default and require Gadget binaries/config to be present. For development-only packaging without Gadget binaries:
 
 ```bash
-./release.py 0.1.1 2 --allow-missing-gadget
+./release.py <version> <versionCode> --allow-missing-gadget
+```
+
+To run the full local pre-release check, use:
+
+```bash
+./check.sh
 ```
 
 ## Updates
@@ -291,6 +301,8 @@ User-edited runtime config files are intentionally not replaced by automatic upd
 targets.conf
 module.conf
 libgadget.config.so
+gadget/arm64-v8a/libgadget.config.so
+gadget/armeabi-v7a/libgadget.config.so
 ```
 
 New defaults are shipped as `.example` files. If you add new configuration options in a release, document them in the changelog so users can merge them into their existing configs if needed.
@@ -348,6 +360,21 @@ dlopen(payload_path, RTLD_NOW | RTLD_GLOBAL);
 Because Gadget is loaded from the app native library directory, Frida can read `libgadget.config.so` from the same directory without opening `/data/adb` to app processes.
 
 If the process already has the configured payload path, `libgadget.so`, or a versioned `libgadget-*.so` mapped, the loader logs `payload already loaded, skip dlopen` and does not load Gadget again.
+
+## Zygisk Companion
+
+The native loader needs `targets.conf` and `module.conf` when an app process starts. On some devices, zygote/app contexts cannot read files under `/data/adb/modules` directly because of SELinux policy.
+
+To avoid broadening permissions, the module reads these module-private config files through the Zygisk companion process. The app/zygote side connects to the companion, requests one allowed config file, and receives the file contents over Zygisk IPC.
+
+Only these files are served by the companion:
+
+```text
+targets.conf
+module.conf
+```
+
+Frida Gadget itself is still loaded from the target app native library directory under `/data/app`, and `libgadget.config.so` is deployed next to it so Gadget can read its own config normally.
 
 ## Limitations
 

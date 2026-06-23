@@ -6,11 +6,23 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 
 
 REPO = "leolovenet/Zygisk-FridaGadget"
 MODULE_ID = "zygisk_frida_gadget"
+RUNTIME_CONFIGS = {
+    "targets.conf",
+    "module.conf",
+    "libgadget.config.so",
+}
+EXAMPLE_CONFIGS = {
+    "targets.conf.example",
+    "module.conf.example",
+    "libgadget.config.so.example",
+}
 
 
 def die(message):
@@ -77,6 +89,48 @@ def ensure_changelog(path, version):
         path.write_text(text)
 
 
+def extract_changelog_section(path, version):
+    text = path.read_text()
+    heading = f"## {version}"
+    match = re.search(rf"^##\s+{re.escape(version)}\s*$", text, re.MULTILINE)
+    if match is None:
+        die(f"CHANGELOG.md missing section: {heading}")
+
+    start = match.end()
+    next_match = re.search(r"^##\s+", text[start:], re.MULTILINE)
+    end = start + next_match.start() if next_match else len(text)
+    section = text[start:end].strip()
+    if not section:
+        die(f"CHANGELOG.md section is empty: {heading}")
+    if "TODO" in section:
+        die(f"CHANGELOG.md section still contains TODO: {heading}")
+    return section + "\n"
+
+
+def validate_release_zip(zip_path):
+    if not zip_path.is_file():
+        die(f"release zip not found: {zip_path}")
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        bad = zf.testzip()
+        if bad is not None:
+            die(f"release zip test failed at: {bad}")
+
+        names = set(zf.namelist())
+
+    forbidden = sorted(name for name in names if Path(name).name in RUNTIME_CONFIGS)
+    if forbidden:
+        die("release zip contains runtime config files: " + ", ".join(forbidden))
+
+    missing = sorted(name for name in EXAMPLE_CONFIGS if name not in names)
+    if missing:
+        die("release zip missing example config files: " + ", ".join(missing))
+
+    for name in ("zygisk/armeabi-v7a.so", "zygisk/arm64-v8a.so"):
+        if name not in names:
+            die(f"release zip missing native loader: {name}")
+
+
 def has_uncommitted_changes(cwd):
     return bool(capture(["git", "status", "--porcelain"], cwd))
 
@@ -109,22 +163,29 @@ def publish(root_dir, repo, version):
     if not zip_path.is_file():
         die(f"release zip not found: {zip_path}")
 
-    notes = root_dir / "CHANGELOG.md"
-    run([
-        gh,
-        "release",
-        "create",
-        tag,
-        zip_path,
-        "--repo",
-        repo,
-        "--target",
-        "main",
-        "--title",
-        tag,
-        "--notes-file",
-        notes,
-    ], root_dir)
+    notes = extract_changelog_section(root_dir / "CHANGELOG.md", version)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
+        tmp.write(notes)
+        notes_path = Path(tmp.name)
+
+    try:
+        run([
+            gh,
+            "release",
+            "create",
+            tag,
+            zip_path,
+            "--repo",
+            repo,
+            "--target",
+            "main",
+            "--title",
+            tag,
+            "--notes-file",
+            notes_path,
+        ], root_dir)
+    finally:
+        notes_path.unlink(missing_ok=True)
 
 
 def main():
@@ -147,6 +208,7 @@ def main():
         require_clean_publish_state(root_dir)
 
     build(root_dir, strict=not args.allow_missing_gadget)
+    validate_release_zip(root_dir / "out" / f"{MODULE_ID}.zip")
 
     if args.publish:
         publish(root_dir, args.repo, version)

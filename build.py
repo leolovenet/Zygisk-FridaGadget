@@ -40,10 +40,15 @@ def has_any(paths):
     return any(path.exists() or path.is_symlink() for path in paths)
 
 
+def is_gadget_candidate(path):
+    name = path.name
+    return name == "libgadget.so" or name.startswith("libgadget-") or name.startswith("frida-gadget-")
+
+
 def check_inputs(root_dir):
     gadget_paths = [
-        *root_dir.glob("gadget/arm64-v8a/*.so"),
-        *root_dir.glob("gadget/armeabi-v7a/*.so"),
+        *(path for path in root_dir.glob("gadget/arm64-v8a/*.so") if is_gadget_candidate(path)),
+        *(path for path in root_dir.glob("gadget/armeabi-v7a/*.so") if is_gadget_candidate(path)),
         root_dir / "libgadget.so",
     ]
     config_paths = [

@@ -56,7 +56,7 @@ The repository tracks the default template as:
 targets.conf.example
 ```
 
-`customize.sh` creates `targets.conf` from this template only on first install. During updates, existing runtime config files are preserved before the module zip is extracted and restored afterward.
+`customize.sh` creates `targets.conf` from this template only on first install. During updates or local reinstalls, existing runtime config files are preserved from the live module directory before the module zip is extracted and restored afterward. This includes root config files and ABI-specific `gadget/<abi>/libgadget.config.so` files.
 
 Format:
 
@@ -251,7 +251,51 @@ targets.conf
 module.conf
 ```
 
-The older `getModuleDir/openat` path remains a fallback, not the primary path.
+There is intentionally no app/zygote-side `getModuleDir/openat` fallback for these config files. Calling that path from zygote/app context can still trigger SELinux denials on affected devices.
+
+## Zygisk/Magisk Development Pitfalls
+
+Treat zygote/app code, companion code, install scripts, and release tooling as separate trust and permission domains. A path or operation working in one domain does not imply it works in another.
+
+Zygote/app side:
+
+- Do not assume app or zygote contexts can read `/data/adb/modules`.
+- Avoid `api->getModuleDir()` for runtime config reads from app/zygote paths on affected devices; it can still trigger SELinux denials.
+- Keep work in `preAppSpecialize()` small and deterministic. Read config, decide, resolve payload, and load; avoid broad filesystem scans unless needed as fallback.
+- Always consider process bitness. A 32-bit app process must not load a 64-bit Gadget. Runtime payload resolution should prefer `lib/arm` for 32-bit and `lib/arm64` for 64-bit.
+- Match package and process names with explicit boundaries. `/data/app` directory names may contain package-like prefixes, suffixes, split install randomness, and similar package names.
+
+Companion process:
+
+- Use Zygisk companion IPC for module-private files that app/zygote contexts should not open directly.
+- Keep the companion surface small. This project only serves `targets.conf` and `module.conf`.
+- Do not expose arbitrary path reads through companion requests. Always use an allowlist and size limits.
+- A fixed module id path reduces dynamic module-id flexibility, but avoids app/zygote-side `getModuleDir()` calls and matches the published module id/update metadata.
+
+Install and update scripts:
+
+- `$MODPATH` during install/update may be a staging path, not the live module directory.
+- Preserve user runtime config from `/data/adb/modules/<module-id>` during local reinstall/update flows, then restore into the new `$MODPATH`.
+- Only create runtime config from `.example` files when no preserved user config exists.
+- Do not package real runtime config files in releases. Package `.example` files and let install scripts create runtime files.
+- Cleanup should run after a package has been successfully deployed, so a partial failure does not remove the previous working deployment.
+- Boot-time deployment should avoid force-stopping apps; install and manual Action redeploy flows may force-stop successfully deployed packages when enabled.
+
+Packaging and release:
+
+- Magisk/Kitsune module zips need traditional `META-INF/com/google/android/updater-script` and `update-binary` entries for broad manager compatibility.
+- Preserve Unix modes and symlinks in the zip. Frida Gadget selectors may be symlinks or tiny selector files.
+- Validate release zips before publishing: no runtime configs anywhere in the archive, required `.example` files present, both ABI loaders present, and both Zygisk entry symbols exported.
+- Use a new version/versionCode for every published fix. Do not reuse a tag after a broken GitHub release exists.
+- Local `./build.sh` is for building a test zip; `release.py` owns version metadata, update JSON, release zip validation, and optional GitHub publishing.
+
+Frida Gadget deployment:
+
+- Loading Gadget from `/data/adb/modules` can break Gadget config discovery or hit SELinux restrictions.
+- `/data/local/tmp` is not a reliable executable mapping location on modern Android.
+- Deploy Gadget and `libgadget.config.so` into the target app native library directory so Gadget can discover its config next to the loaded library.
+- Sync owner, group, permissions, and SELinux context from an existing native library when writing into `/data/app`.
+- App updates may replace the native library directory, so users may need to run `action.sh` again after app updates.
 
 ## Important Lessons Learned
 
@@ -395,53 +439,20 @@ This command:
   - `changelog`
 - Ensures `CHANGELOG.md` has a section for the version.
 - Runs the deterministic build and writes `out/zygisk_frida_gadget.zip`.
+- Validates the release zip before publishing.
+- Uses only the matching `CHANGELOG.md` version section as GitHub release notes.
 
 Before publishing:
 
 1. Replace any generated TODO release notes in `CHANGELOG.md`.
-2. Run syntax checks:
+2. Run the local pre-release check:
 
 ```bash
-bash -n build.sh
-bash -n customize.sh
-bash -n deploy_gadget.sh
-bash -n service.sh
-python3 -m py_compile build.py release.py
-python3 -m json.tool update.json
+./check.sh
 ```
 
-3. Verify the zip contains examples, not real runtime configs:
-
-```bash
-python3 - <<'PY'
-import zipfile
-with zipfile.ZipFile('out/zygisk_frida_gadget.zip') as z:
-    names = set(z.namelist())
-    for name in [
-        'targets.conf',
-        'module.conf',
-        'libgadget.config.so',
-        'targets.conf.example',
-        'module.conf.example',
-        'libgadget.config.so.example',
-    ]:
-        print(f'{name}:', 'yes' if name in names else 'no')
-PY
-```
-
-Expected:
-
-```text
-targets.conf: no
-module.conf: no
-libgadget.config.so: no
-targets.conf.example: yes
-module.conf.example: yes
-libgadget.config.so.example: yes
-```
-
-4. Commit and push `main`.
-5. Publish the GitHub release:
+3. Commit and push `main`.
+4. Publish the GitHub release:
 
 ```bash
 ./release.py <version> <versionCode> --publish

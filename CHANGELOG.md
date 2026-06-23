@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4
+
+- Route module-private config reads exclusively through the Zygisk companion process.
+- Remove app/zygote-side `getModuleDir/openat` fallback reads to avoid SELinux denials.
+- Fix `target config not found: targets.conf` on devices that block zygote/app access to `/data/adb/modules`.
+- Preserve runtime config files from the live module directory during local reinstall/update flows.
+- Preserve ABI-specific Gadget config files from `gadget/<abi>/libgadget.config.so`.
+- Keep the companion config surface limited to `targets.conf` and `module.conf`.
+
 ## 0.1.3
 
 - Read native module configuration through Zygisk companion IPC.

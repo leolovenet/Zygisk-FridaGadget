@@ -26,6 +26,9 @@ enum MatchMode {
 
 static const char *TARGETS_CONFIG_PATH = "targets.conf";
 static const char *MODULE_CONFIG_PATH = "module.conf";
+// App/zygote contexts must not open /data/adb/modules directly. The companion
+// process uses the fixed module id path to serve the small config allowlist.
+static const char *MODULE_DIR_PATH = "/data/adb/modules/zygisk_frida_gadget";
 static const char *PAYLOAD_NAME = "libgadget.so";
 static const uint32_t COMPANION_OP_READ_FILE = 1;
 static const uint32_t MODULE_FILE_MAX_SIZE = 1024 * 1024;
@@ -118,6 +121,21 @@ static int readModuleFileFromFd(int moduleDir, const char *path, char **out) {
     data[used] = 0;
     *out = data;
     return static_cast<int>(used);
+}
+
+static int readModuleFileFromPath(const char *path, char **out) {
+    if (!isAllowedModuleFile(path)) {
+        return -1;
+    }
+
+    int moduleDir = open(MODULE_DIR_PATH, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (moduleDir < 0) {
+        return -1;
+    }
+
+    int len = readModuleFileFromFd(moduleDir, path, out);
+    close(moduleDir);
+    return len;
 }
 
 class ZygiskFridaGadget : public zygisk::ModuleBase {
@@ -364,20 +382,7 @@ private:
             return data;
         }
 
-        if (api == 0) {
-            return 0;
-        }
-
-        int moduleDir = api->getModuleDir();
-        if (moduleDir < 0) {
-            return 0;
-        }
-
-        if (readModuleFileFromFd(moduleDir, path, &data) <= 0) {
-            return 0;
-        }
-
-        return data;
+        return 0;
     }
 
     void loadModuleConfig() {
@@ -691,7 +696,7 @@ void zygisk_companion_entry(int client) {
     path[pathLen] = 0;
 
     char *data = 0;
-    int len = readModuleFileFromFd(AT_FDCWD, path, &data);
+    int len = readModuleFileFromPath(path, &data);
     if (len > 0 && data != 0) {
         status = 0;
         size = static_cast<uint32_t>(len);
