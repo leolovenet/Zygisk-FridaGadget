@@ -1,0 +1,10 @@
+.DS_Store
+build/
+out/
+module/obj/
+module/libs/
+*.d
+__pycache__/
+*.pyc
+libgadget.so
+gadget/**/*.so

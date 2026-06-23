@@ -1,0 +1,23 @@
+#!/sbin/sh
+
+OUTFD="$2"
+ZIPFILE="$3"
+
+ui_print() {
+  echo "ui_print $1" > /proc/self/fd/"$OUTFD"
+  echo "ui_print" > /proc/self/fd/"$OUTFD"
+}
+
+ui_print "- Installing Zygisk - Frida Gadget"
+
+if [ -f /data/adb/magisk/util_functions.sh ]; then
+  . /data/adb/magisk/util_functions.sh
+elif [ -f /data/adb/ksu/util_functions.sh ]; then
+  . /data/adb/ksu/util_functions.sh
+else
+  ui_print "! Unable to find Magisk util_functions.sh"
+  exit 1
+fi
+
+install_module
+exit 0

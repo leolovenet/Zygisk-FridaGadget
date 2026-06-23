@@ -1,0 +1,6 @@
+id=zygisk_frida_gadget
+name=Zygisk - Frida Gadget
+version=0.1.0
+versionCode=1
+author=leolovenet
+description=Configurable Zygisk loader for Frida Gadget
