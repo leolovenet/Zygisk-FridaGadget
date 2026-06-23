@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Read native module configuration through Zygisk companion IPC.
+- Avoid direct `/data/adb/modules` reads from zygote/app contexts.
+- Keep `getModuleDir/openat` config reads as a fallback path.
+- Document the companion-based config read path.
+
 ## 0.1.2
 
 - Add optional automatic force-stop after successful Gadget deployment.

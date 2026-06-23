@@ -194,6 +194,8 @@ libgadget.config.so
 
 On module updates, existing runtime config files are preserved before the new zip is extracted and restored afterward.
 
+The native loader reads `targets.conf` and `module.conf` through the Zygisk companion process. This avoids direct `/data/adb/modules` reads from zygote/app contexts, which may be denied by SELinux on some devices.
+
 ## Debug Logging
 
 Edit `module.conf`:
@@ -213,6 +215,7 @@ Important logs are always emitted:
 
 - target matched
 - payload path resolved
+- config read failures
 - start loading payload
 - dlopen success/failure
 
@@ -336,7 +339,7 @@ for each package that was actually deployed. To disable this behavior, set `forc
 ```
 
 6. It syncs owner, group, mode, and SELinux context from an existing `.so` in that directory.
-7. The Zygisk module reads `targets.conf`, matches the current process name, resolves the current app install directory from `/proc/self/maps` or `/data/app`, checks whether Gadget is already mapped in the process, and calls:
+7. The Zygisk module reads `targets.conf` via the companion process, matches the current process name, resolves the current app install directory from `/proc/self/maps` or `/data/app`, checks whether Gadget is already mapped in the process, and calls:
 
 ```cpp
 dlopen(payload_path, RTLD_NOW | RTLD_GLOBAL);

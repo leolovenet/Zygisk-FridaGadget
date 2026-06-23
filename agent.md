@@ -204,7 +204,7 @@ The loader:
 
 1. Runs in `preAppSpecialize()`.
 2. Reads `args->nice_name`.
-3. Reads `module.conf` and `targets.conf` through the module directory fd from Zygisk API.
+3. Reads `module.conf` and `targets.conf` through Zygisk companion IPC.
 4. Applies the configured process match mode.
 5. If matched, resolves the current app install directory from `/proc/self/maps` and stores the resolved `payload_path`.
 6. Runs in `postAppSpecialize()`.
@@ -231,6 +231,27 @@ force_stop=1
 Debug mode controls noisy non-target process logs. Target matches, load attempts, and errors are always logged.
 
 `force_stop` is consumed by `deploy_gadget.sh`, not the native loader.
+
+The native loader intentionally does not rely on zygote/app processes reading `/data/adb/modules` directly. Some devices deny that with SELinux:
+
+```text
+avc: denied { read } for path="/data/adb/modules/zygisk_frida_gadget"
+```
+
+For module-private config reads, `main.cpp` uses `Api::connectCompanion()` and exports:
+
+```text
+zygisk_companion_entry
+```
+
+The companion side only serves a small allowlist:
+
+```text
+targets.conf
+module.conf
+```
+
+The older `getModuleDir/openat` path remains a fallback, not the primary path.
 
 ## Important Lessons Learned
 
@@ -272,6 +293,8 @@ Permission denied
 ```
 
 Opening `/data/adb` permissions with `post-fs-data.sh` was rejected as too broad and unsafe.
+
+Later, direct native config reads from zygote also hit SELinux denial on some devices. The fix is to read module-private config through Zygisk companion IPC instead of making app/zygote contexts open files under `/data/adb/modules`.
 
 ### `/data/local/tmp` Is Not Suitable For Executable Mapping
 

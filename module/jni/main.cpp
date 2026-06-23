@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "zygisk.hpp"
@@ -26,6 +27,98 @@ enum MatchMode {
 static const char *TARGETS_CONFIG_PATH = "targets.conf";
 static const char *MODULE_CONFIG_PATH = "module.conf";
 static const char *PAYLOAD_NAME = "libgadget.so";
+static const uint32_t COMPANION_OP_READ_FILE = 1;
+static const uint32_t MODULE_FILE_MAX_SIZE = 1024 * 1024;
+
+static bool isAllowedModuleFile(const char *path) {
+    return strcmp(path, TARGETS_CONFIG_PATH) == 0 || strcmp(path, MODULE_CONFIG_PATH) == 0;
+}
+
+static bool readExact(int fd, void *buffer, size_t size) {
+    char *cursor = static_cast<char *>(buffer);
+    size_t done = 0;
+    while (done < size) {
+        ssize_t len = read(fd, cursor + done, size - done);
+        if (len <= 0) {
+            return false;
+        }
+        done += static_cast<size_t>(len);
+    }
+    return true;
+}
+
+static bool writeExact(int fd, const void *buffer, size_t size) {
+    const char *cursor = static_cast<const char *>(buffer);
+    size_t done = 0;
+    while (done < size) {
+        ssize_t len = write(fd, cursor + done, size - done);
+        if (len <= 0) {
+            return false;
+        }
+        done += static_cast<size_t>(len);
+    }
+    return true;
+}
+
+static int readModuleFileFromFd(int moduleDir, const char *path, char **out) {
+    if (!isAllowedModuleFile(path)) {
+        return -1;
+    }
+
+    int fd = openat(moduleDir, path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return -1;
+    }
+
+    size_t capacity = 4096;
+    size_t used = 0;
+    char *data = static_cast<char *>(malloc(capacity + 1));
+    if (data == 0) {
+        close(fd);
+        return -1;
+    }
+
+    for (;;) {
+        if (used == capacity) {
+            if (capacity >= MODULE_FILE_MAX_SIZE) {
+                free(data);
+                close(fd);
+                return -1;
+            }
+
+            size_t nextCapacity = capacity * 2;
+            char *next = static_cast<char *>(realloc(data, nextCapacity + 1));
+            if (next == 0) {
+                free(data);
+                close(fd);
+                return -1;
+            }
+            data = next;
+            capacity = nextCapacity;
+        }
+
+        ssize_t len = read(fd, data + used, capacity - used);
+        if (len < 0) {
+            free(data);
+            close(fd);
+            return -1;
+        }
+        if (len == 0) {
+            break;
+        }
+        used += static_cast<size_t>(len);
+    }
+
+    close(fd);
+    if (used == 0) {
+        free(data);
+        return -1;
+    }
+
+    data[used] = 0;
+    *out = data;
+    return static_cast<int>(used);
+}
 
 class ZygiskFridaGadget : public zygisk::ModuleBase {
 public:
@@ -200,93 +293,90 @@ private:
     }
 
     bool readModuleFile(const char *path, char *out, size_t outSize) {
-        if (api == 0) {
+        char *data = readModuleFileAlloc(path);
+        if (data == 0) {
             return false;
         }
 
-        int moduleDir = api->getModuleDir();
-        if (moduleDir < 0) {
+        size_t len = strlen(data);
+        if (len == 0 || len >= outSize) {
+            free(data);
             return false;
         }
 
-        int fd = openat(moduleDir, path, O_RDONLY | O_CLOEXEC);
-        if (fd < 0) {
-            return false;
-        }
-
-        ssize_t len = read(fd, out, outSize - 1);
-        close(fd);
-
-        if (len <= 0) {
-            return false;
-        }
-
-        out[len] = 0;
+        memcpy(out, data, len + 1);
+        free(data);
         return true;
     }
 
-    char *readModuleFileAlloc(const char *path) {
+    char *readModuleFileViaCompanion(const char *path) {
         if (api == 0) {
             return 0;
         }
 
-        int moduleDir = api->getModuleDir();
-        if (moduleDir < 0) {
+        if (!isAllowedModuleFile(path)) {
             return 0;
         }
 
-        int fd = openat(moduleDir, path, O_RDONLY | O_CLOEXEC);
+        int fd = api->connectCompanion();
         if (fd < 0) {
             return 0;
         }
 
-        size_t capacity = 4096;
-        size_t used = 0;
-        char *data = static_cast<char *>(malloc(capacity + 1));
+        uint32_t op = COMPANION_OP_READ_FILE;
+        uint32_t pathLen = static_cast<uint32_t>(strlen(path));
+        if (!writeExact(fd, &op, sizeof(op)) ||
+            !writeExact(fd, &pathLen, sizeof(pathLen)) ||
+            !writeExact(fd, path, pathLen)) {
+            close(fd);
+            return 0;
+        }
+
+        int32_t status = -1;
+        uint32_t size = 0;
+        if (!readExact(fd, &status, sizeof(status)) ||
+            !readExact(fd, &size, sizeof(size)) ||
+            status != 0 || size == 0 || size > MODULE_FILE_MAX_SIZE) {
+            close(fd);
+            return 0;
+        }
+
+        char *data = static_cast<char *>(malloc(size + 1));
         if (data == 0) {
             close(fd);
             return 0;
         }
 
-        for (;;) {
-            if (used == capacity) {
-                if (capacity >= 1024 * 1024) {
-                    free(data);
-                    close(fd);
-                    LOGE("module file too large: %s", path);
-                    return 0;
-                }
+        if (!readExact(fd, data, size)) {
+            free(data);
+            close(fd);
+            return 0;
+        }
+        close(fd);
 
-                size_t nextCapacity = capacity * 2;
-                char *next = static_cast<char *>(realloc(data, nextCapacity + 1));
-                if (next == 0) {
-                    free(data);
-                    close(fd);
-                    return 0;
-                }
-                data = next;
-                capacity = nextCapacity;
-            }
+        data[size] = 0;
+        return data;
+    }
 
-            ssize_t len = read(fd, data + used, capacity - used);
-            if (len < 0) {
-                free(data);
-                close(fd);
-                return 0;
-            }
-            if (len == 0) {
-                break;
-            }
-            used += static_cast<size_t>(len);
+    char *readModuleFileAlloc(const char *path) {
+        char *data = readModuleFileViaCompanion(path);
+        if (data != 0) {
+            return data;
         }
 
-        close(fd);
-        if (used == 0) {
-            free(data);
+        if (api == 0) {
             return 0;
         }
 
-        data[used] = 0;
+        int moduleDir = api->getModuleDir();
+        if (moduleDir < 0) {
+            return 0;
+        }
+
+        if (readModuleFileFromFd(moduleDir, path, &data) <= 0) {
+            return 0;
+        }
+
         return data;
     }
 
@@ -573,5 +663,48 @@ private:
     bool debugLoaded = false;
     bool debugEnabled = false;
 };
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void zygisk_companion_entry(int client) {
+    uint32_t op = 0;
+    uint32_t pathLen = 0;
+    int32_t status = -1;
+    uint32_t size = 0;
+
+    if (!readExact(client, &op, sizeof(op)) ||
+        !readExact(client, &pathLen, sizeof(pathLen)) ||
+        op != COMPANION_OP_READ_FILE ||
+        pathLen == 0 || pathLen > 128) {
+        writeExact(client, &status, sizeof(status));
+        writeExact(client, &size, sizeof(size));
+        close(client);
+        return;
+    }
+
+    char path[129];
+    if (!readExact(client, path, pathLen)) {
+        writeExact(client, &status, sizeof(status));
+        writeExact(client, &size, sizeof(size));
+        close(client);
+        return;
+    }
+    path[pathLen] = 0;
+
+    char *data = 0;
+    int len = readModuleFileFromFd(AT_FDCWD, path, &data);
+    if (len > 0 && data != 0) {
+        status = 0;
+        size = static_cast<uint32_t>(len);
+        writeExact(client, &status, sizeof(status));
+        writeExact(client, &size, sizeof(size));
+        writeExact(client, data, size);
+        free(data);
+    } else {
+        writeExact(client, &status, sizeof(status));
+        writeExact(client, &size, sizeof(size));
+    }
+
+    close(client);
+}
 
 REGISTER_ZYGISK_MODULE(ZygiskFridaGadget)
