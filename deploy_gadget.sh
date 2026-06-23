@@ -1,10 +1,13 @@
 #!/system/bin/sh
 
 TARGETS_CONFIG="targets.conf"
+MODULE_CONFIG="module.conf"
 DEPLOY_LOG=""
 SELECTOR_MAX_BYTES=256
 DEPLOY_SELECTED=""
 DEPLOY_PACKAGES=""
+DEPLOY_FORCE_STOP_PACKAGES=""
+DEPLOY_FORCE_STOP=1
 
 deploy_log() {
   local msg="$1"
@@ -33,6 +36,32 @@ valid_abi() {
     auto|arm64-v8a|armeabi-v7a) return 0 ;;
   esac
   return 1
+}
+
+load_deploy_config() {
+  local moddir="$1"
+  local allow_force_stop="$2"
+  local config="$moddir/$MODULE_CONFIG"
+  local key value
+
+  DEPLOY_FORCE_STOP=1
+  [ "$allow_force_stop" = "1" ] || DEPLOY_FORCE_STOP=0
+
+  [ -f "$config" ] || return 0
+
+  while IFS='=' read -r key value; do
+    key=$(trim_field "$key")
+    value=$(trim_field "$value")
+
+    case "$key" in
+      force_stop)
+        case "$value" in
+          0|false|False|FALSE|no|No|NO|off|Off|OFF) DEPLOY_FORCE_STOP=0 ;;
+          1|true|True|TRUE|yes|Yes|YES|on|On|ON) DEPLOY_FORCE_STOP=1 ;;
+        esac
+        ;;
+    esac
+  done < "$config"
 }
 
 trim_field() {
@@ -248,6 +277,20 @@ record_package() {
   echo "$package" >> "$DEPLOY_PACKAGES" 2>/dev/null
 }
 
+record_force_stop_package() {
+  local package="$1"
+
+  [ "$DEPLOY_FORCE_STOP" = "1" ] || return 0
+  [ -n "$DEPLOY_FORCE_STOP_PACKAGES" ] || return 0
+  [ -f "$DEPLOY_FORCE_STOP_PACKAGES" ] || return 0
+
+  if grep -Fqx "$package" "$DEPLOY_FORCE_STOP_PACKAGES" 2>/dev/null; then
+    return 0
+  fi
+
+  echo "$package" >> "$DEPLOY_FORCE_STOP_PACKAGES" 2>/dev/null
+}
+
 record_selected_dir() {
   local package="$1"
   local app_dir="$2"
@@ -286,6 +329,27 @@ cleanup_deployed_packages() {
     [ -n "$app_dir" ] || continue
     cleanup_extra_dirs "$selected" "$app_dir"
   done < "$DEPLOY_PACKAGES"
+}
+
+force_stop_deployed_packages() {
+  local package
+
+  [ "$DEPLOY_FORCE_STOP" = "1" ] || {
+    deploy_log "- force_stop disabled"
+    return 0
+  }
+
+  [ -n "$DEPLOY_FORCE_STOP_PACKAGES" ] || return 0
+  [ -f "$DEPLOY_FORCE_STOP_PACKAGES" ] || return 0
+
+  while IFS= read -r package; do
+    [ -n "$package" ] || continue
+    if /system/bin/am force-stop "$package" >/dev/null 2>&1; then
+      deploy_log "- Force-stopped $package"
+    else
+      deploy_log "- Failed to force-stop $package"
+    fi
+  done < "$DEPLOY_FORCE_STOP_PACKAGES"
 }
 
 deploy_one_target() {
@@ -351,20 +415,26 @@ deploy_one_target() {
   }
 
   record_package "$package"
+  record_force_stop_package "$package"
 }
 
 deploy_gadget() {
   local moddir="$1"
+  local allow_force_stop="${2:-1}"
   local config="$moddir/$TARGETS_CONFIG"
   local package process match abi extra
 
   DEPLOY_LOG="$moddir/deploy.log"
   DEPLOY_SELECTED="$moddir/deploy.selected"
   DEPLOY_PACKAGES="$moddir/deploy.packages"
+  DEPLOY_FORCE_STOP_PACKAGES="$moddir/deploy.force_stop"
   : > "$DEPLOY_LOG" 2>/dev/null
   : > "$DEPLOY_SELECTED" 2>/dev/null
   : > "$DEPLOY_PACKAGES" 2>/dev/null
+  : > "$DEPLOY_FORCE_STOP_PACKAGES" 2>/dev/null
   chmod 0644 "$DEPLOY_LOG" 2>/dev/null
+
+  load_deploy_config "$moddir" "$allow_force_stop"
 
   [ -f "$config" ] || {
     deploy_log "- targets.conf not found"
@@ -396,5 +466,6 @@ deploy_gadget() {
   done < "$config"
 
   cleanup_deployed_packages
-  rm -f "$DEPLOY_SELECTED" "$DEPLOY_PACKAGES" 2>/dev/null
+  force_stop_deployed_packages
+  rm -f "$DEPLOY_SELECTED" "$DEPLOY_PACKAGES" "$DEPLOY_FORCE_STOP_PACKAGES" 2>/dev/null
 }

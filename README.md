@@ -200,9 +200,14 @@ Edit `module.conf`:
 
 ```text
 debug=0
+force_stop=1
 ```
 
 Set `debug=1` to log non-target process checks and other verbose matching details.
+
+Set `force_stop=0` to disable automatic force-stop after successful deployment.
+
+When `force_stop=1`, install and manual redeploy flows force-stop each successfully deployed package once after all files are copied. This makes the next app launch enter the new Zygisk/Gadget path without a separate manual command. Boot-time deployment from `service.sh` always skips force-stop to avoid killing apps silently during startup.
 
 Important logs are always emitted:
 
@@ -299,7 +304,7 @@ Reboot after installation.
 
 ## Redeploy Without Reboot
 
-The native loader reads `targets.conf` when each app process starts. If you only change process matching and Gadget has already been deployed for that package, force-stop and restart the target app.
+The native loader reads `targets.conf` when each app process starts. If you only change process matching and Gadget has already been deployed for that package, restart the target app.
 
 If you add a new package, change Gadget files, or need to redeploy into the target app native lib directory, run:
 
@@ -309,11 +314,13 @@ adb shell su -c '/data/adb/modules/zygisk_frida_gadget/action.sh'
 
 Some Magisk managers show an Action button for modules that provide `action.sh`. If the button is available, tapping it runs the same redeploy flow and prints `deploy.log`. If your Magisk/Kitsune build only shows Remove, use the adb command above.
 
-Then force-stop and restart the target app:
+By default, successful install and Action redeploy flows automatically run:
 
-```bash
-adb shell am force-stop com.example.app
+```text
+/system/bin/am force-stop <package>
 ```
+
+for each package that was actually deployed. To disable this behavior, set `force_stop=0` in `module.conf`.
 
 ## How It Works
 

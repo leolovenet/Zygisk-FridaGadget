@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Add optional automatic force-stop after successful Gadget deployment.
+- Enable `force_stop=1` by default for install and manual Action redeploy flows.
+- Skip force-stop during boot-time `service.sh` deployment.
+- Document how to disable automatic force-stop with `force_stop=0`.
+
 ## 0.1.1
 
 - Preserve user configuration files during module updates.
