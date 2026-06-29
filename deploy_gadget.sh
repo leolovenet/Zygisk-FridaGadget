@@ -8,6 +8,8 @@ DEPLOY_SELECTED=""
 DEPLOY_PACKAGES=""
 DEPLOY_FORCE_STOP_PACKAGES=""
 DEPLOY_FORCE_STOP=1
+DEPLOY_LOG_STDOUT=1
+PROFILE_MAX_LENGTH=96
 
 deploy_log() {
   local msg="$1"
@@ -19,7 +21,7 @@ deploy_log() {
   if [ -n "$OUTFD" ]; then
     echo "ui_print $msg" > /proc/self/fd/"$OUTFD"
     echo "ui_print" > /proc/self/fd/"$OUTFD"
-  else
+  elif [ "$DEPLOY_LOG_STDOUT" = "1" ]; then
     echo "$msg"
   fi
 }
@@ -36,6 +38,35 @@ valid_abi() {
     auto|arm64-v8a|armeabi-v7a) return 0 ;;
   esac
   return 1
+}
+
+valid_profile() {
+  local profile="$1"
+
+  case "$profile" in
+    ""|default) return 0 ;;
+    *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*|.*|*..*) return 1 ;;
+  esac
+  [ "${#profile}" -le "$PROFILE_MAX_LENGTH" ] || return 1
+  return 0
+}
+
+profile_payload_name() {
+  local profile="$1"
+
+  case "$profile" in
+    ""|default) echo "libgadget.so" ;;
+    *) echo "libgadget-$profile.so" ;;
+  esac
+}
+
+profile_config_name() {
+  local profile="$1"
+
+  case "$profile" in
+    ""|default) echo "libgadget.config.so" ;;
+    *) echo "libgadget-$profile.config.so" ;;
+  esac
 }
 
 load_deploy_config() {
@@ -79,7 +110,7 @@ find_ref_so() {
   for file in "$dir"/*.so; do
     [ -f "$file" ] || continue
     case "$file" in
-      */libgadget.so|*/libgadget.config.so) continue ;;
+      */libgadget.so|*/libgadget.config.so|*/libgadget-*.so|*/libgadget-*.config.so) continue ;;
     esac
     echo "$file"
     return 0
@@ -90,8 +121,8 @@ find_ref_so() {
 
 sync_metadata() {
   local dir="$1"
-  local so="$dir/libgadget.so"
-  local cfg="$dir/libgadget.config.so"
+  local so="$2"
+  local cfg="$3"
   local ref_so owner group mode
 
   ref_so=$(find_ref_so "$dir")
@@ -115,6 +146,28 @@ sync_metadata() {
       restorecon "$so" "$cfg" 2>/dev/null
     fi
   fi
+}
+
+log_gadget_files_in_dir() {
+  local dir="$1"
+  local file name size found
+
+  found=0
+  for file in "$dir"/libgadget*; do
+    [ -e "$file" ] || continue
+    if [ "$found" = "0" ]; then
+      deploy_log "- libgadget files in $dir:"
+      found=1
+    fi
+
+    name=${file##*/}
+    size=$(stat -c '%s' "$file" 2>/dev/null)
+    if [ -n "$size" ]; then
+      deploy_log "  - $name ($size bytes)"
+    else
+      deploy_log "  - $name"
+    fi
+  done
 }
 
 find_gadget_so_in_dir() {
@@ -168,6 +221,9 @@ find_gadget_so_in_dir() {
   count=0
   for file in "$dir"/libgadget-*.so "$dir"/frida-gadget-*.so; do
     [ -f "$file" ] || continue
+    case "$file" in
+      *.config.so) continue ;;
+    esac
     found="$file"
     count=$((count + 1))
   done
@@ -209,11 +265,20 @@ gadget_source_so() {
 gadget_config_for_so() {
   local moddir="$1"
   local gadget_so="$2"
-  local src_dir
+  local profile="$3"
+  local src_dir config_name
 
   src_dir=${gadget_so%/*}
-  [ -f "$src_dir/libgadget.config.so" ] && echo "$src_dir/libgadget.config.so" && return 0
-  [ -f "$moddir/libgadget.config.so" ] && echo "$moddir/libgadget.config.so" && return 0
+  config_name=$(profile_config_name "$profile")
+
+  if [ "$config_name" != "libgadget.config.so" ]; then
+    [ -f "$src_dir/$config_name" ] && echo "$src_dir/$config_name" && return 0
+    [ -f "$moddir/$config_name" ] && echo "$moddir/$config_name" && return 0
+    return 1
+  fi
+
+  [ -f "$src_dir/$config_name" ] && echo "$src_dir/$config_name" && return 0
+  [ -f "$moddir/$config_name" ] && echo "$moddir/$config_name" && return 0
 
   return 1
 }
@@ -223,30 +288,37 @@ copy_to_lib_dir() {
   local package="$2"
   local lib_dir="$3"
   local source_abi="$4"
-  local gadget_so gadget_config
+  local profile="$5"
+  local gadget_so gadget_config payload_name config_name payload_path config_path
 
   gadget_so=$(gadget_source_so "$moddir" "$source_abi") || {
-    deploy_log "- Gadget file not found for $package abi=$source_abi"
+    deploy_log "- Gadget file not found for $package abi=$source_abi profile=$profile"
     return 1
   }
 
-  gadget_config=$(gadget_config_for_so "$moddir" "$gadget_so") || {
-    deploy_log "- libgadget.config.so not found for $package abi=$source_abi"
+  gadget_config=$(gadget_config_for_so "$moddir" "$gadget_so" "$profile") || {
+    deploy_log "- $(profile_config_name "$profile") not found for $package abi=$source_abi profile=$profile"
     return 1
   }
 
-  cp -f "$gadget_so" "$lib_dir/libgadget.so" || {
+  payload_name=$(profile_payload_name "$profile")
+  config_name=$(profile_config_name "$profile")
+  payload_path="$lib_dir/$payload_name"
+  config_path="$lib_dir/$config_name"
+
+  cp -f "$gadget_so" "$payload_path" || {
     deploy_log "- Failed to copy Gadget to $lib_dir"
     return 1
   }
 
-  cp -f "$gadget_config" "$lib_dir/libgadget.config.so" || {
+  cp -f "$gadget_config" "$config_path" || {
     deploy_log "- Failed to copy Gadget config to $lib_dir"
     return 1
   }
 
-  sync_metadata "$lib_dir"
-  deploy_log "- Gadget deployed for $package abi=$source_abi to $lib_dir"
+  sync_metadata "$lib_dir" "$payload_path" "$config_path"
+  deploy_log "- Gadget deployed for $package abi=$source_abi profile=$profile to $lib_dir"
+  log_gadget_files_in_dir "$lib_dir"
   return 0
 }
 
@@ -260,7 +332,7 @@ cleanup_extra_dirs() {
     case "$selected" in
       *"|$dir|"*) continue ;;
     esac
-    rm -f "$dir/libgadget.so" "$dir/libgadget.config.so" 2>/dev/null
+    rm -f "$dir"/libgadget.so "$dir"/libgadget.config.so "$dir"/libgadget-*.so "$dir"/libgadget-*.config.so 2>/dev/null
   done
 }
 
@@ -358,7 +430,8 @@ deploy_one_target() {
   local process="$3"
   local match="$4"
   local abi="$5"
-  local apk_path app_dir selected
+  local profile="$6"
+  local apk_path app_dir selected attempted attempted_abi
 
   : "$process"
 
@@ -373,6 +446,11 @@ deploy_one_target() {
     return 0
   }
 
+  valid_profile "$profile" || {
+    deploy_log "- Invalid profile for $package: $profile"
+    return 0
+  }
+
   apk_path=$(pm path "$package" 2>/dev/null | sed -n 's/^package://p' | head -n 1)
   [ -n "$apk_path" ] || {
     deploy_log "- Target package not found: $package"
@@ -381,36 +459,59 @@ deploy_one_target() {
 
   app_dir=${apk_path%/*}
   selected="|"
+  attempted=0
+  attempted_abi=0
 
   if [ "$abi" = "auto" ]; then
-    if [ -d "$app_dir/lib/arm64" ] && copy_to_lib_dir "$moddir" "$package" "$app_dir/lib/arm64" "arm64-v8a"; then
-      selected="$selected$app_dir/lib/arm64|"
-      record_selected_dir "$package" "$app_dir" "$app_dir/lib/arm64"
+    if [ -d "$app_dir/lib/arm64" ]; then
+      attempted=1
+      attempted_abi=1
+      if copy_to_lib_dir "$moddir" "$package" "$app_dir/lib/arm64" "arm64-v8a" "$profile"; then
+        selected="$selected$app_dir/lib/arm64|"
+        record_selected_dir "$package" "$app_dir" "$app_dir/lib/arm64"
+      fi
     fi
 
-    if [ -d "$app_dir/lib/arm" ] && copy_to_lib_dir "$moddir" "$package" "$app_dir/lib/arm" "armeabi-v7a"; then
-      selected="$selected$app_dir/lib/arm|"
-      record_selected_dir "$package" "$app_dir" "$app_dir/lib/arm"
+    if [ -d "$app_dir/lib/arm" ]; then
+      attempted=1
+      attempted_abi=1
+      if copy_to_lib_dir "$moddir" "$package" "$app_dir/lib/arm" "armeabi-v7a" "$profile"; then
+        selected="$selected$app_dir/lib/arm|"
+        record_selected_dir "$package" "$app_dir" "$app_dir/lib/arm"
+      fi
     fi
 
-    if [ "$selected" = "|" ] && [ -d "$app_dir/lib" ] && copy_to_lib_dir "$moddir" "$package" "$app_dir/lib" "auto"; then
-      selected="$selected$app_dir/lib|"
-      record_selected_dir "$package" "$app_dir" "$app_dir/lib"
+    if [ "$selected" = "|" ] && [ "$attempted_abi" = "0" ] && [ -d "$app_dir/lib" ]; then
+      attempted=1
+      if copy_to_lib_dir "$moddir" "$package" "$app_dir/lib" "auto" "$profile"; then
+        selected="$selected$app_dir/lib|"
+        record_selected_dir "$package" "$app_dir" "$app_dir/lib"
+      fi
     fi
   elif [ "$abi" = "arm64-v8a" ]; then
-    if [ -d "$app_dir/lib/arm64" ] && copy_to_lib_dir "$moddir" "$package" "$app_dir/lib/arm64" "$abi"; then
-      selected="$selected$app_dir/lib/arm64|"
-      record_selected_dir "$package" "$app_dir" "$app_dir/lib/arm64"
+    if [ -d "$app_dir/lib/arm64" ]; then
+      attempted=1
+      if copy_to_lib_dir "$moddir" "$package" "$app_dir/lib/arm64" "$abi" "$profile"; then
+        selected="$selected$app_dir/lib/arm64|"
+        record_selected_dir "$package" "$app_dir" "$app_dir/lib/arm64"
+      fi
     fi
   elif [ "$abi" = "armeabi-v7a" ]; then
-    if [ -d "$app_dir/lib/arm" ] && copy_to_lib_dir "$moddir" "$package" "$app_dir/lib/arm" "$abi"; then
-      selected="$selected$app_dir/lib/arm|"
-      record_selected_dir "$package" "$app_dir" "$app_dir/lib/arm"
+    if [ -d "$app_dir/lib/arm" ]; then
+      attempted=1
+      if copy_to_lib_dir "$moddir" "$package" "$app_dir/lib/arm" "$abi" "$profile"; then
+        selected="$selected$app_dir/lib/arm|"
+        record_selected_dir "$package" "$app_dir" "$app_dir/lib/arm"
+      fi
     fi
   fi
 
   [ "$selected" != "|" ] || {
-    deploy_log "- Target native lib directory or matching Gadget ABI not found: $package abi=$abi"
+    if [ "$attempted" = "1" ]; then
+      deploy_log "- Deployment skipped for $package abi=$abi profile=$profile; check previous errors"
+    else
+      deploy_log "- Target native lib directory not found for $package abi=$abi"
+    fi
     return 0
   }
 
@@ -422,7 +523,7 @@ deploy_gadget() {
   local moddir="$1"
   local allow_force_stop="${2:-1}"
   local config="$moddir/$TARGETS_CONFIG"
-  local package process match abi extra
+  local package process match abi profile extra
 
   DEPLOY_LOG="$moddir/deploy.log"
   DEPLOY_SELECTED="$moddir/deploy.selected"
@@ -441,11 +542,12 @@ deploy_gadget() {
     return 0
   }
 
-  while IFS='|' read -r package process match abi extra; do
+  while IFS='|' read -r package process match abi profile extra; do
     package=$(trim_field "$package")
     process=$(trim_field "$process")
     match=$(trim_field "$match")
     abi=$(trim_field "$abi")
+    profile=$(trim_field "$profile")
     extra=$(trim_field "$extra")
 
     case "$package" in
@@ -456,13 +558,14 @@ deploy_gadget() {
     [ -n "$process" ] || process="$package"
     [ -n "$match" ] || match="exact"
     [ -n "$abi" ] || abi="auto"
+    [ -n "$profile" ] || profile="default"
 
     if [ -n "$extra" ]; then
       deploy_log "- Invalid targets.conf line for $package: too many fields"
       continue
     fi
 
-    deploy_one_target "$moddir" "$package" "$process" "$match" "$abi"
+    deploy_one_target "$moddir" "$package" "$process" "$match" "$abi" "$profile"
   done < "$config"
 
   cleanup_deployed_packages

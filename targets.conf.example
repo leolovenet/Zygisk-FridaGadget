@@ -1,2 +1,19 @@
-# package|process|match|abi
-com.example.app|com.example.app|exact|auto
+# package|process|match|abi|profile
+#
+# package: required Android package name
+# process: optional process name, empty means package
+#
+# match: optional, default exact
+#   exact | prefix | suffix | contains
+#
+# abi: optional, default auto
+#   auto | arm64-v8a | armeabi-v7a
+#
+# profile: optional, default default
+#   default -> libgadget.so + libgadget.config.so
+#   custom  -> libgadget-<profile>.so + libgadget-<profile>.config.so
+#   allowed chars: letters, numbers, dot, underscore, dash; max 96 chars; no leading dot or ".."
+#
+# Examples:
+# com.example.app|com.example.app|exact|auto|default
+# com.example.app|com.example.app:remote|exact|auto|remote

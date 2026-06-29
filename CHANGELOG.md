@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5
+
+- Add optional `profile` field to `targets.conf` for per-process Gadget payload/config profiles.
+- Deploy non-default profiles as `libgadget-<profile>.so` with matching `libgadget-<profile>.config.so`.
+- Preserve profile-specific Gadget configs during module updates and local reinstalls.
+- Remove profile-specific deployed Gadget files during uninstall and unused ABI cleanup.
+- Improve manual redeploy output and profile validation diagnostics.
+
 ## 0.1.4
 
 - Route module-private config reads exclusively through the Zygisk companion process.

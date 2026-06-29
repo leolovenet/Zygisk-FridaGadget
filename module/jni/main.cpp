@@ -30,8 +30,10 @@ static const char *MODULE_CONFIG_PATH = "module.conf";
 // process uses the fixed module id path to serve the small config allowlist.
 static const char *MODULE_DIR_PATH = "/data/adb/modules/zygisk_frida_gadget";
 static const char *PAYLOAD_NAME = "libgadget.so";
+static const char *DEFAULT_PROFILE = "default";
 static const uint32_t COMPANION_OP_READ_FILE = 1;
 static const uint32_t MODULE_FILE_MAX_SIZE = 1024 * 1024;
+static const size_t PROFILE_MAX_LENGTH = 96;
 
 static bool isAllowedModuleFile(const char *path) {
     return strcmp(path, TARGETS_CONFIG_PATH) == 0 || strcmp(path, MODULE_CONFIG_PATH) == 0;
@@ -288,6 +290,53 @@ private:
         return access(path, R_OK) == 0;
     }
 
+    static bool isDefaultProfile(const char *profile) {
+        return profile == 0 || profile[0] == 0 || strcmp(profile, DEFAULT_PROFILE) == 0;
+    }
+
+    static bool validProfile(const char *profile) {
+        if (isDefaultProfile(profile)) {
+            return true;
+        }
+
+        if (profile[0] == '.') {
+            return false;
+        }
+
+        if (strlen(profile) > PROFILE_MAX_LENGTH) {
+            return false;
+        }
+
+        bool previousDot = false;
+        for (const char *p = profile; *p != 0; p++) {
+            char ch = *p;
+            bool valid = (ch >= 'a' && ch <= 'z') ||
+                         (ch >= 'A' && ch <= 'Z') ||
+                         (ch >= '0' && ch <= '9') ||
+                         ch == '.' || ch == '_' || ch == '-';
+            if (!valid) {
+                return false;
+            }
+
+            if (ch == '.' && previousDot) {
+                return false;
+            }
+            previousDot = ch == '.';
+        }
+
+        return true;
+    }
+
+    static bool payloadNameForProfile(char *out, size_t outSize, const char *profile) {
+        int written;
+        if (isDefaultProfile(profile)) {
+            written = snprintf(out, outSize, "%s", PAYLOAD_NAME);
+        } else {
+            written = snprintf(out, outSize, "libgadget-%s.so", profile);
+        }
+        return written > 0 && (size_t) written < outSize;
+    }
+
     static bool isGadgetAlreadyLoaded(const char *payloadPath) {
         if (payloadPath == 0 || payloadPath[0] == 0) {
             return false;
@@ -403,30 +452,33 @@ private:
         }
     }
 
-    static bool writeCandidate(char *out, size_t outSize, const char *dir) {
-        int written = snprintf(out, outSize, "%s/%s", dir, PAYLOAD_NAME);
+    static bool writeCandidate(char *out, size_t outSize, const char *dir, const char *payloadName) {
+        int written = snprintf(out, outSize, "%s/%s", dir, payloadName);
         if (written <= 0 || (size_t) written >= outSize) {
             return false;
         }
         return fileExists(out);
     }
 
-    static bool checkLibDir(char *out, size_t outSize, const char *appDir, const char *abiDir) {
+    static bool checkLibDir(char *out, size_t outSize, const char *appDir, const char *abiDir,
+                            const char *payloadName) {
         char dir[512];
         int written = snprintf(dir, sizeof(dir), "%s/%s", appDir, abiDir);
-        return written > 0 && (size_t) written < sizeof(dir) && writeCandidate(out, outSize, dir);
+        return written > 0 && (size_t) written < sizeof(dir) &&
+               writeCandidate(out, outSize, dir, payloadName);
     }
 
-    static bool checkLibDirs(char *out, size_t outSize, const char *appDir) {
+    static bool checkLibDirs(char *out, size_t outSize, const char *appDir,
+                             const char *payloadName) {
         if (sizeof(void *) == 8) {
-            if (checkLibDir(out, outSize, appDir, "lib/arm64")) {
+            if (checkLibDir(out, outSize, appDir, "lib/arm64", payloadName)) {
                 return true;
             }
-        } else if (checkLibDir(out, outSize, appDir, "lib/arm")) {
+        } else if (checkLibDir(out, outSize, appDir, "lib/arm", payloadName)) {
             return true;
         }
 
-        return checkLibDir(out, outSize, appDir, "lib");
+        return checkLibDir(out, outSize, appDir, "lib", payloadName);
     }
 
     static bool isPackageAppDirName(const char *name, const char *packageName) {
@@ -445,7 +497,7 @@ private:
     }
 
     static bool checkAppDirFromPath(char *out, size_t outSize, const char *path,
-                                    const char *packageName) {
+                                    const char *packageName, const char *payloadName) {
         char appDir[512];
         const char *baseApk = strstr(path, "/base.apk");
         const char *libDir = strstr(path, "/lib/");
@@ -469,10 +521,11 @@ private:
         if (!isPackageAppDirName(baseName(appDir), packageName)) {
             return false;
         }
-        return checkLibDirs(out, outSize, appDir);
+        return checkLibDirs(out, outSize, appDir, payloadName);
     }
 
-    static bool findPayloadPathFromMaps(char *out, size_t outSize, const char *packageName) {
+    static bool findPayloadPathFromMaps(char *out, size_t outSize, const char *packageName,
+                                        const char *payloadName) {
         FILE *fp = fopen("/proc/self/maps", "re");
         if (fp == 0) {
             return false;
@@ -490,7 +543,7 @@ private:
                 *newline = 0;
             }
 
-            if (checkAppDirFromPath(out, outSize, path, packageName)) {
+            if (checkAppDirFromPath(out, outSize, path, packageName, payloadName)) {
                 fclose(fp);
                 return true;
             }
@@ -501,7 +554,7 @@ private:
     }
 
     static bool scanDataAppForPackage(char *out, size_t outSize, const char *base,
-                                      const char *packageName, int depth) {
+                                      const char *packageName, const char *payloadName, int depth) {
         if (depth > 3) {
             return false;
         }
@@ -524,13 +577,14 @@ private:
                 continue;
             }
 
-            if (isPackageAppDirName(name, packageName) && checkLibDirs(out, outSize, path)) {
+            if (isPackageAppDirName(name, packageName) &&
+                checkLibDirs(out, outSize, path, payloadName)) {
                 closedir(dir);
                 return true;
             }
 
             if (entry->d_type == DT_DIR || entry->d_type == DT_UNKNOWN) {
-                if (scanDataAppForPackage(out, outSize, path, packageName, depth + 1)) {
+                if (scanDataAppForPackage(out, outSize, path, packageName, payloadName, depth + 1)) {
                     closedir(dir);
                     return true;
                 }
@@ -541,13 +595,14 @@ private:
         return false;
     }
 
-    static bool findPayloadPath(char *out, size_t outSize, const char *packageName) {
-        if (findPayloadPathFromMaps(out, outSize, packageName)) {
+    static bool findPayloadPath(char *out, size_t outSize, const char *packageName,
+                                const char *payloadName) {
+        if (findPayloadPathFromMaps(out, outSize, packageName, payloadName)) {
             LOGI("payload path resolved from maps");
             return true;
         }
 
-        if (scanDataAppForPackage(out, outSize, "/data/app", packageName, 0)) {
+        if (scanDataAppForPackage(out, outSize, "/data/app", packageName, payloadName, 0)) {
             LOGI("payload path resolved from /data/app scan");
             return true;
         }
@@ -590,6 +645,7 @@ private:
         char *targetProcess = nextField(&cursor);
         char *match = nextField(&cursor);
         char *abi = nextField(&cursor);
+        char *profile = nextField(&cursor);
         char *extra = nextField(&cursor);
 
         (void) abi;
@@ -613,6 +669,16 @@ private:
             match = const_cast<char *>("exact");
         }
 
+        profile = profile == 0 ? const_cast<char *>(DEFAULT_PROFILE) : trimField(profile);
+        if (profile[0] == 0) {
+            profile = const_cast<char *>(DEFAULT_PROFILE);
+        }
+
+        if (!validProfile(profile)) {
+            LOGE("invalid profile in targets.conf: package=%s profile=%s", packageName, profile);
+            return false;
+        }
+
         MatchMode matchMode;
         if (!parseMatchMode(match, &matchMode)) {
             LOGE("invalid match mode in targets.conf: package=%s match=%s", packageName, match);
@@ -623,14 +689,20 @@ private:
             return false;
         }
 
-        if (!findPayloadPath(payloadPath, sizeof(payloadPath), packageName)) {
-            LOGE("target matched but payload path could not be resolved: process=%s package=%s",
-                 processName, packageName);
+        char payloadName[128];
+        if (!payloadNameForProfile(payloadName, sizeof(payloadName), profile)) {
+            LOGE("payload name is too long: package=%s profile=%s", packageName, profile);
             return false;
         }
 
-        LOGI("target matched: process=%s package=%s target_process=%s match=%s",
-             processName, packageName, targetProcess, match);
+        if (!findPayloadPath(payloadPath, sizeof(payloadPath), packageName, payloadName)) {
+            LOGE("target matched but payload path could not be resolved: process=%s package=%s profile=%s payload=%s",
+                 processName, packageName, profile, payloadName);
+            return false;
+        }
+
+        LOGI("target matched: process=%s package=%s target_process=%s match=%s profile=%s payload=%s",
+             processName, packageName, targetProcess, match, profile, payloadName);
         return true;
     }
 

@@ -40,8 +40,14 @@ def has_any(paths):
     return any(path.exists() or path.is_symlink() for path in paths)
 
 
+def root_profile_configs(root_dir):
+    return sorted(root_dir.glob("libgadget-*.config.so"))
+
+
 def is_gadget_candidate(path):
     name = path.name
+    if name.endswith(".config.so"):
+        return False
     return name == "libgadget.so" or name.startswith("libgadget-") or name.startswith("frida-gadget-")
 
 
@@ -54,8 +60,11 @@ def check_inputs(root_dir):
     config_paths = [
         root_dir / "libgadget.config.so",
         root_dir / "libgadget.config.so.example",
+        *root_profile_configs(root_dir),
         root_dir / "gadget/arm64-v8a/libgadget.config.so",
         root_dir / "gadget/armeabi-v7a/libgadget.config.so",
+        *root_dir.glob("gadget/arm64-v8a/libgadget-*.config.so"),
+        *root_dir.glob("gadget/armeabi-v7a/libgadget-*.config.so"),
     ]
 
     missing = []
@@ -153,6 +162,8 @@ def stage_files(root_dir, build_dir):
         src = root_dir / optional
         if src.exists() or src.is_symlink():
             copy_file(src, build_dir / optional)
+    for src in root_profile_configs(root_dir):
+        copy_file(src, build_dir / src.name)
 
     for name in ("module.prop", "module.conf.example", "targets.conf.example", "libgadget.config.so.example"):
         os.chmod(build_dir / name, 0o644)
@@ -166,7 +177,7 @@ def stage_files(root_dir, build_dir):
     os.chmod(build_dir / "META-INF/com/google/android/update-binary", 0o755)
 
     chmod_tree(build_dir / "gadget")
-    for optional in ("libgadget.so", "libgadget.config.so"):
+    for optional in ("libgadget.so", "libgadget.config.so", *[path.name for path in root_profile_configs(root_dir)]):
         path = build_dir / optional
         if path.exists() and not path.is_symlink():
             os.chmod(path, 0o644)
@@ -200,6 +211,8 @@ def zip_entries(build_dir):
     for optional in ("libgadget.so", "libgadget.config.so"):
         if (build_dir / optional).exists() or (build_dir / optional).is_symlink():
             entries.append(optional)
+    for path in sorted(build_dir.glob("libgadget-*.config.so")):
+        entries.append(path.name)
 
     return entries
 

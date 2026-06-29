@@ -38,7 +38,7 @@ The module should:
 
 - Use Zygisk to enter selected app processes.
 - Deploy Frida Gadget and its config into a path Gadget can read.
-- Load Gadget by real path so `libgadget.config.so` is discovered naturally.
+- Load Gadget by real path so the matching `.config.so` file is discovered naturally.
 - Avoid opening `/data/adb` permissions to app processes.
 - Be target-configurable without recompiling native code.
 
@@ -56,13 +56,13 @@ The repository tracks the default template as:
 targets.conf.example
 ```
 
-`customize.sh` creates `targets.conf` from this template only on first install. During updates or local reinstalls, existing runtime config files are preserved from the live module directory before the module zip is extracted and restored afterward. This includes root config files and ABI-specific `gadget/<abi>/libgadget.config.so` files.
+`customize.sh` creates `targets.conf` from this template only on first install. During updates or local reinstalls, existing runtime config files are preserved from the live module directory before the module zip is extracted and restored afterward. This includes root config files, ABI-specific `gadget/<abi>/libgadget.config.so` files, and profile-specific `libgadget-*.config.so` files.
 
 Format:
 
 ```text
-# package|process|match|abi
-com.example.app|com.example.app|exact|auto
+# package|process|match|abi|profile
+com.example.app|com.example.app|exact|auto|default
 ```
 
 Supported `match` values:
@@ -99,6 +99,7 @@ gadget/
     libgadget-<version>.so
     libgadget.so -> libgadget-<version>.so
 libgadget.config.so
+libgadget-<profile>.config.so
 ```
 
 The repository tracks:
@@ -116,7 +117,7 @@ gadget/arm64-v8a/libgadget-17.15.3.so
 gadget/armeabi-v7a/libgadget-17.15.3.so
 ```
 
-During deployment the selected source file is normalized to `libgadget.so` in the target app native library directory. If `gadget/<abi>/libgadget.so` is a symlink, the deployment script resolves it and copies the real target file. This keeps Frida Gadget config discovery simple because `libgadget.config.so` sits next to the loaded `libgadget.so`.
+During deployment the selected source file is normalized to `libgadget.so` for the default profile, or `libgadget-<profile>.so` for non-default profiles, in the target app native library directory. If `gadget/<abi>/libgadget.so` is a symlink, the deployment script resolves it and copies the real target file. This keeps Frida Gadget config discovery simple because the matching `.config.so` file sits next to the loaded Gadget library.
 
 Plain source filenames are still supported:
 
@@ -152,7 +153,7 @@ deploy_gadget.sh
    - `lib/arm`
    - `lib`
 4. With `abi=auto`, deploys arm64 Gadget to `lib/arm64` and arm Gadget to `lib/arm` when those directories and source files exist.
-5. Copies the source Gadget file as `libgadget.so` and copies `libgadget.config.so` next to it.
+5. Copies the source Gadget file as `libgadget.so` or `libgadget-<profile>.so` and copies the matching `.config.so` next to it.
 6. Removes duplicate Gadget files from unselected candidate lib dirs.
 7. Syncs metadata from an existing `.so` in the same directory:
    - owner
@@ -215,7 +216,7 @@ The loader:
 dlopen(payload_path, RTLD_NOW | RTLD_GLOBAL);
 ```
 
-Because `payload_path` points into the target app native library directory, Frida Gadget can read `libgadget.config.so` from the same directory.
+Because `payload_path` points into the target app native library directory, Frida Gadget can read the matching `.config.so` from the same directory.
 
 If the process already has the configured payload path mapped, the loader logs `payload already loaded, skip dlopen` and skips loading.
 

@@ -5,6 +5,31 @@ CONFIG_BACKUP="$MODPATH/.config-backup"
 CONFIG_FILES="targets.conf module.conf libgadget.config.so gadget/arm64-v8a/libgadget.config.so gadget/armeabi-v7a/libgadget.config.so"
 LIVE_MODPATH="/data/adb/modules/zygisk_frida_gadget"
 
+backup_one_config() {
+  local source_dir="$1"
+  local file="$2"
+
+  [ -e "$source_dir/$file" ] || return 0
+  case "$file" in
+    */*) mkdir -p "$CONFIG_BACKUP/${file%/*}" 2>/dev/null ;;
+  esac
+  cp -af "$source_dir/$file" "$CONFIG_BACKUP/$file" 2>/dev/null
+}
+
+backup_profile_configs() {
+  local source_dir="$1"
+  local source file
+
+  for source in \
+    "$source_dir"/libgadget-*.config.so \
+    "$source_dir"/gadget/arm64-v8a/libgadget-*.config.so \
+    "$source_dir"/gadget/armeabi-v7a/libgadget-*.config.so; do
+    [ -e "$source" ] || continue
+    file=${source#"$source_dir"/}
+    backup_one_config "$source_dir" "$file"
+  done
+}
+
 backup_user_config() {
   local file source_dir
 
@@ -15,16 +40,14 @@ backup_user_config() {
   [ -d "$source_dir" ] || source_dir="$MODPATH"
 
   for file in $CONFIG_FILES; do
-    [ -e "$source_dir/$file" ] || continue
-    case "$file" in
-      */*) mkdir -p "$CONFIG_BACKUP/${file%/*}" 2>/dev/null ;;
-    esac
-    cp -af "$source_dir/$file" "$CONFIG_BACKUP/$file" 2>/dev/null
+    backup_one_config "$source_dir" "$file"
   done
+
+  backup_profile_configs "$source_dir"
 }
 
 restore_or_create_config() {
-  local file
+  local file source
 
   for file in $CONFIG_FILES; do
     if [ -e "$CONFIG_BACKUP/$file" ]; then
@@ -40,6 +63,20 @@ restore_or_create_config() {
 
     [ -e "$MODPATH/$file" ] && set_perm "$MODPATH/$file" 0 0 0644
     [ -e "$MODPATH/$file.example" ] && set_perm "$MODPATH/$file.example" 0 0 0644
+  done
+
+  for source in \
+    "$CONFIG_BACKUP"/libgadget-*.config.so \
+    "$CONFIG_BACKUP"/gadget/arm64-v8a/libgadget-*.config.so \
+    "$CONFIG_BACKUP"/gadget/armeabi-v7a/libgadget-*.config.so; do
+    [ -e "$source" ] || continue
+    file=${source#"$CONFIG_BACKUP"/}
+    case "$file" in
+      */*) mkdir -p "$MODPATH/${file%/*}" 2>/dev/null ;;
+    esac
+    cp -af "$source" "$MODPATH/$file" 2>/dev/null
+    set_perm "$MODPATH/$file" 0 0 0644
+    ui_print "- Preserved existing $file"
   done
 
   rm -rf "$CONFIG_BACKUP" 2>/dev/null

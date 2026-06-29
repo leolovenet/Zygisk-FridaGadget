@@ -13,13 +13,13 @@ remove_gadget_for_package() {
   app_dir=${apk_path%/*}
   for dir in "$app_dir/lib/arm64" "$app_dir/lib/arm" "$app_dir/lib"; do
     [ -d "$dir" ] || continue
-    rm -f "$dir/libgadget.so" "$dir/libgadget.config.so" 2>/dev/null
+    rm -f "$dir"/libgadget.so "$dir"/libgadget.config.so "$dir"/libgadget-*.so "$dir"/libgadget-*.config.so 2>/dev/null
   done
 }
 
 [ -f "$CONFIG" ] || exit 0
 
-while IFS='|' read -r package process match abi; do
+while IFS='|' read -r package process match abi profile extra; do
   case "$package" in
     ""|\#*) continue ;;
   esac
