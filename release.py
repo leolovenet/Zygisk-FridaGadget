@@ -107,6 +107,13 @@ def extract_changelog_section(path, version):
     return section + "\n"
 
 
+def is_runtime_config_name(name):
+    return (
+        name in RUNTIME_CONFIGS
+        or (name.startswith("libgadget-") and name.endswith(".config.so"))
+    )
+
+
 def validate_release_zip(zip_path):
     if not zip_path.is_file():
         die(f"release zip not found: {zip_path}")
@@ -118,7 +125,7 @@ def validate_release_zip(zip_path):
 
         names = set(zf.namelist())
 
-    forbidden = sorted(name for name in names if Path(name).name in RUNTIME_CONFIGS)
+    forbidden = sorted(name for name in names if is_runtime_config_name(Path(name).name))
     if forbidden:
         die("release zip contains runtime config files: " + ", ".join(forbidden))
 

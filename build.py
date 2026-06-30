@@ -44,6 +44,13 @@ def root_profile_configs(root_dir):
     return sorted(root_dir.glob("libgadget-*.config.so"))
 
 
+def is_runtime_config_name(name):
+    return (
+        name in ("targets.conf", "module.conf", "libgadget.config.so")
+        or (name.startswith("libgadget-") and name.endswith(".config.so"))
+    )
+
+
 def is_gadget_candidate(path):
     name = path.name
     if name.endswith(".config.so"):
@@ -94,6 +101,10 @@ def remove(path):
 def copy_file(src, dst):
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst, follow_symlinks=False)
+
+
+def ignore_runtime_configs(_dir, names):
+    return [name for name in names if is_runtime_config_name(name)]
 
 
 def chmod_tree(path):
@@ -156,14 +167,12 @@ def stage_files(root_dir, build_dir):
 
     gadget_dir = root_dir / "gadget"
     if gadget_dir.is_dir():
-        shutil.copytree(gadget_dir, build_dir / "gadget", symlinks=True)
+        shutil.copytree(gadget_dir, build_dir / "gadget", symlinks=True, ignore=ignore_runtime_configs)
 
-    for optional in ("libgadget.so", "libgadget.config.so"):
+    for optional in ("libgadget.so",):
         src = root_dir / optional
         if src.exists() or src.is_symlink():
             copy_file(src, build_dir / optional)
-    for src in root_profile_configs(root_dir):
-        copy_file(src, build_dir / src.name)
 
     for name in ("module.prop", "module.conf.example", "targets.conf.example", "libgadget.config.so.example"):
         os.chmod(build_dir / name, 0o644)
@@ -177,7 +186,7 @@ def stage_files(root_dir, build_dir):
     os.chmod(build_dir / "META-INF/com/google/android/update-binary", 0o755)
 
     chmod_tree(build_dir / "gadget")
-    for optional in ("libgadget.so", "libgadget.config.so", *[path.name for path in root_profile_configs(root_dir)]):
+    for optional in ("libgadget.so",):
         path = build_dir / optional
         if path.exists() and not path.is_symlink():
             os.chmod(path, 0o644)
@@ -206,13 +215,14 @@ def zip_entries(build_dir):
             dirs.sort()
             files.sort()
             for name in files:
-                entries.append(str((Path(root) / name).relative_to(build_dir)))
+                path = Path(root) / name
+                if is_runtime_config_name(path.name):
+                    continue
+                entries.append(str(path.relative_to(build_dir)))
 
-    for optional in ("libgadget.so", "libgadget.config.so"):
+    for optional in ("libgadget.so",):
         if (build_dir / optional).exists() or (build_dir / optional).is_symlink():
             entries.append(optional)
-    for path in sorted(build_dir.glob("libgadget-*.config.so")):
-        entries.append(path.name)
 
     return entries
 

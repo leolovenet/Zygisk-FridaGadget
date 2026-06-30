@@ -424,7 +424,7 @@ out/zygisk_frida_gadget.zip
 
 `build.sh` is a small compatibility wrapper around `build.py`. Python is used for deterministic zip packaging and preserving Unix file modes/symlinks without depending on a platform-specific `zip` command.
 
-By default, missing Gadget binaries or config files produce warnings so you can build the loader first and add Gadget later. For release builds, use strict mode:
+By default, missing Gadget binaries or Gadget config sources produce warnings so you can build the loader first and add Gadget later. For release builds, use strict mode:
 
 ```bash
 STRICT_BUILD=1 ./build.sh
@@ -458,9 +458,9 @@ and runs the deterministic build. Review the changes, commit them, and push `mai
 ./release.py <version> <versionCode> --publish
 ```
 
-`release.py` validates the generated zip before publishing: runtime config files must stay out of the release package, `.example` config files must be present, and both Zygisk ABI loaders must be included. GitHub release notes are generated from the matching `CHANGELOG.md` version section.
+`release.py` validates the generated zip before publishing: runtime config files must stay out of the release package, `.example` config files must be present, and both Zygisk ABI loaders must be included. Runtime config validation covers `targets.conf`, `module.conf`, root Gadget configs such as `libgadget.config.so` and `libgadget-*.config.so`, and ABI-specific Gadget configs under `gadget/<abi>/`. GitHub release notes are generated from the matching `CHANGELOG.md` version section.
 
-Release builds use strict mode by default and require Gadget binaries/config to be present. For development-only packaging without Gadget binaries:
+Release builds use strict mode by default and require Gadget binaries plus a Gadget config source, which can be a runtime config file or the tracked `libgadget.config.so.example` template. For development-only packaging without Gadget binaries:
 
 ```bash
 ./release.py <version> <versionCode> --allow-missing-gadget
