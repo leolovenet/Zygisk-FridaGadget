@@ -158,8 +158,8 @@ jobs:
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
         run: |
           set -euo pipefail
-          ./release.py "$MODULE_VERSION" "$VERSION_CODE"
           ./check.sh
+          ./release.py "$MODULE_VERSION" "$VERSION_CODE"
 
       - name: Summarize release artifact
         if: steps.existing.outputs.exists != 'true'
@@ -175,7 +175,7 @@ jobs:
           import zipfile
           from pathlib import Path
 
-          zip_path = Path("out/zygisk_frida_gadget.zip")
+          zip_path = Path(f"out/zygisk_frida_gadget-v{os.environ['MODULE_VERSION']}.zip")
           runtime_names = {
               "targets.conf",
               "module.conf",
@@ -276,7 +276,7 @@ jobs:
               raise SystemExit(f"CHANGELOG.md section is not publishable: ## {version}")
           print(section)
           PY
-          gh release create "$RELEASE_TAG" out/zygisk_frida_gadget.zip \
+          gh release create "$RELEASE_TAG" "out/zygisk_frida_gadget-v${MODULE_VERSION}.zip" \
             --repo "$GITHUB_REPOSITORY" \
             --target main \
             --title "$RELEASE_TAG" \

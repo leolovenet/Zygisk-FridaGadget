@@ -460,6 +460,12 @@ and runs the deterministic build. Review the changes, commit them, and push `mai
 
 `release.py` validates the generated zip before publishing: runtime config files must stay out of the release package, `.example` config files must be present, and both Zygisk ABI loaders must be included. Runtime config validation covers `targets.conf`, `module.conf`, root Gadget configs such as `libgadget.config.so` and `libgadget-*.config.so`, and ABI-specific Gadget configs under `gadget/<abi>/`. GitHub release notes are generated from the matching `CHANGELOG.md` version section.
 
+Local builds keep the stable filename `out/zygisk_frida_gadget.zip`. Release builds also create a versioned GitHub asset name, for example:
+
+```text
+out/zygisk_frida_gadget-v17.15.3-1.zip
+```
+
 Release builds use strict mode by default and require Gadget binaries plus a Gadget config source, which can be a runtime config file or the tracked `libgadget.config.so.example` template. For development-only packaging without Gadget binaries:
 
 ```bash
@@ -486,7 +492,7 @@ gadget/arm64-v8a/libgadget-<version>.so
 gadget/armeabi-v7a/libgadget-<version>.so
 ```
 
-then runs the normal release validation chain. It commits `module.prop`, `update.json`, and `CHANGELOG.md` back to `main` before creating the GitHub release so Magisk update metadata points at the new zip.
+then runs the normal release validation chain. It commits `module.prop`, `update.json`, and `CHANGELOG.md` back to `main` before creating the GitHub release so Magisk update metadata points at the new versioned zip.
 
 ## Updates
 
@@ -504,7 +510,7 @@ update.json: version, versionCode, zipUrl
 CHANGELOG.md: release notes
 ```
 
-Then build and upload `out/zygisk_frida_gadget.zip` to a GitHub release whose tag matches the `zipUrl`.
+Then build and upload the versioned release zip, such as `out/zygisk_frida_gadget-v17.15.3-1.zip`, to a GitHub release whose tag matches the `zipUrl`.
 
 User-edited runtime config files are intentionally not replaced by automatic updates:
 

@@ -46,6 +46,10 @@ def normalize_version(version):
     return version
 
 
+def release_zip_name(version):
+    return f"{MODULE_ID}-v{version}.zip"
+
+
 def update_module_prop(path, version, version_code):
     lines = path.read_text().splitlines()
     keys = {"version": False, "versionCode": False}
@@ -73,7 +77,7 @@ def update_json(path, version, version_code, repo):
     metadata = {
         "version": version,
         "versionCode": version_code,
-        "zipUrl": f"https://github.com/{repo}/releases/download/{tag}/{MODULE_ID}.zip",
+        "zipUrl": f"https://github.com/{repo}/releases/download/{tag}/{release_zip_name(version)}",
         "changelog": f"https://raw.githubusercontent.com/{repo}/main/CHANGELOG.md",
     }
     path.write_text(json.dumps(metadata, indent=2) + "\n")
@@ -160,13 +164,22 @@ def build(root_dir, strict):
     run([sys.executable, root_dir / "build.py"], root_dir, env=env)
 
 
+def prepare_release_asset(root_dir, version):
+    zip_path = root_dir / "out" / f"{MODULE_ID}.zip"
+    release_path = root_dir / "out" / release_zip_name(version)
+    if not zip_path.is_file():
+        die(f"release zip not found: {zip_path}")
+    shutil.copy2(zip_path, release_path)
+    return release_path
+
+
 def publish(root_dir, repo, version):
     gh = shutil.which("gh")
     if gh is None:
         die("gh not found; install GitHub CLI before publishing")
 
     tag = f"v{version}"
-    zip_path = root_dir / "out" / f"{MODULE_ID}.zip"
+    zip_path = root_dir / "out" / release_zip_name(version)
     if not zip_path.is_file():
         die(f"release zip not found: {zip_path}")
 
@@ -215,7 +228,8 @@ def main():
         require_clean_publish_state(root_dir)
 
     build(root_dir, strict=not args.allow_missing_gadget)
-    validate_release_zip(root_dir / "out" / f"{MODULE_ID}.zip")
+    release_zip_path = prepare_release_asset(root_dir, version)
+    validate_release_zip(release_zip_path)
 
     if args.publish:
         publish(root_dir, args.repo, version)
