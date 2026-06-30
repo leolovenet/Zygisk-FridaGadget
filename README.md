@@ -139,18 +139,24 @@ For early startup hooks, use a fixed port and fail on conflict:
 
 `on_port_conflict=pick-next` is convenient for casual attach, but it is not recommended here because the actual listening port may change. Early startup hooks need the computer side to connect to the exact Gadget endpoint as soon as it appears. Before launching the target app, make sure no previous Gadget instance is still listening on that port.
 
-Use a small POSIX `sh` loop to retry Frida itself:
+Use a small POSIX `sh` wrapper named `frida-retry.sh` to retry Frida itself. The
+wrapper forwards every argument to `frida`; it only adds retry behavior around
+connection/startup failures:
 
 ```sh
 #!/bin/sh
-HOST="${1:-127.0.0.1:27042}"
-SCRIPT="${2:-hooks.js}"
+set -u
+
+DELAY="${FRIDA_RETRY_DELAY:-0.1}"
 
 while :; do
-  frida -H "$HOST" -n Gadget -l "$SCRIPT" && exit 0
+  frida "$@"
   status=$?
+
+  [ "$status" -eq 0 ] && exit 0
   [ "$status" -eq 130 ] && exit "$status"
-  sleep 0.1
+
+  sleep "$DELAY"
 done
 ```
 
@@ -158,7 +164,7 @@ For USB-only testing:
 
 ```sh
 adb forward tcp:27042 tcp:27042
-./attach-gadget.sh 127.0.0.1:27042 hooks.js
+./frida-retry.sh -H 127.0.0.1:27042 -n Gadget -l hooks.js
 ```
 
 Keep critical hook registration as early as possible in your script. Slow setup, delayed async work, or heavy logic before installing hooks can miss early lifecycle calls.
