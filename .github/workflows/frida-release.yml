@@ -161,6 +161,82 @@ jobs:
           ./release.py "$MODULE_VERSION" "$VERSION_CODE"
           ./check.sh
 
+      - name: Summarize release artifact
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          FRIDA_VERSION: ${{ steps.version.outputs.frida_version }}
+          MODULE_VERSION: ${{ steps.version.outputs.module_version }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          zip_path = Path("out/zygisk_frida_gadget.zip")
+          runtime_names = {
+              "targets.conf",
+              "module.conf",
+              "libgadget.config.so",
+          }
+
+          def is_runtime_config(name):
+              return name in runtime_names or (
+                  name.startswith("libgadget-") and name.endswith(".config.so")
+              )
+
+          with zipfile.ZipFile(zip_path) as zf:
+              names = sorted(zf.namelist())
+
+          forbidden = [name for name in names if is_runtime_config(Path(name).name)]
+          gadget_entries = [
+              name for name in names
+              if name.startswith("gadget/") and Path(name).name.startswith("libgadget")
+          ]
+          example_entries = [
+              name for name in names
+              if name in {
+                  "targets.conf.example",
+                  "module.conf.example",
+                  "libgadget.config.so.example",
+              }
+          ]
+
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          lines = [
+              "# Frida release artifact",
+              "",
+              "| Field | Value |",
+              "| --- | --- |",
+              f"| Frida version | `{os.environ['FRIDA_VERSION']}` |",
+              f"| Module version | `{os.environ['MODULE_VERSION']}` |",
+              f"| Release tag | `{os.environ['RELEASE_TAG']}` |",
+              f"| versionCode | `{os.environ['VERSION_CODE']}` |",
+              f"| Zip | `{zip_path}` |",
+              f"| Zip size | `{zip_path.stat().st_size:,} bytes` |",
+              f"| Entries | `{len(names)}` |",
+              f"| Runtime configs | `{'none' if not forbidden else ', '.join(forbidden)}` |",
+              "",
+              "## Gadget entries",
+              "",
+          ]
+          lines.extend(f"- `{name}`" for name in gadget_entries)
+          lines.extend([
+              "",
+              "## Example configs",
+              "",
+          ])
+          lines.extend(f"- `{name}`" for name in example_entries)
+          lines.append("")
+
+          summary.write_text("\n".join(lines))
+
+          if forbidden:
+              raise SystemExit("release zip contains runtime config files")
+          PY
+
       - name: Commit release metadata
         if: steps.existing.outputs.exists != 'true'
         env:
