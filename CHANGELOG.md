@@ -1,5 +1,9 @@
 # Changelog
 
+## 17.15.3-1
+
+- Rebuild with Frida Gadget 17.15.3.
+
 ## 0.1.5
 
 - Add optional `profile` field to `targets.conf` for per-process Gadget payload/config profiles.
