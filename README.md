@@ -466,6 +466,28 @@ Release builds use strict mode by default and require Gadget binaries plus a Gad
 ./release.py <version> <versionCode> --allow-missing-gadget
 ```
 
+### Automated Frida releases
+
+The `Frida release` GitHub Actions workflow can publish module builds that track upstream Frida releases. It runs on a daily schedule and can also be started manually from the Actions tab.
+
+For an upstream Frida version such as `17.15.3`, the workflow publishes module version `17.15.3-1`, where `-1` is the package revision for this module. If the matching GitHub release already exists, the workflow exits without rebuilding.
+
+The workflow downloads the official Android Frida Gadget assets from `frida/frida`, packages:
+
+```text
+frida-gadget-<version>-android-arm64.so.xz
+frida-gadget-<version>-android-arm.so.xz
+```
+
+as:
+
+```text
+gadget/arm64-v8a/libgadget-<version>.so
+gadget/armeabi-v7a/libgadget-<version>.so
+```
+
+then runs the normal release validation chain. It commits `module.prop`, `update.json`, and `CHANGELOG.md` back to `main` before creating the GitHub release so Magisk update metadata points at the new zip.
+
 ## Updates
 
 Magisk-compatible module managers can check for updates when `module.prop` contains:

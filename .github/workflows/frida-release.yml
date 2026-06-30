@@ -1,0 +1,202 @@
+name: Frida release
+
+on:
+  workflow_dispatch:
+    inputs:
+      frida_version:
+        description: Frida version to package, for example 17.15.3. Defaults to latest.
+        required: false
+      package_revision:
+        description: Package revision suffix for this module build.
+        required: false
+        default: "1"
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: frida-release
+      cancel-in-progress: false
+    env:
+      NDK_VERSION: "27.2.12479018"
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve Frida version
+        id: version
+        env:
+          INPUT_FRIDA_VERSION: ${{ inputs.frida_version }}
+          INPUT_PACKAGE_REVISION: ${{ inputs.package_revision }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INPUT_FRIDA_VERSION:-}" ]; then
+            frida_version="${INPUT_FRIDA_VERSION#v}"
+            frida_tag="$INPUT_FRIDA_VERSION"
+          else
+            frida_tag="$(gh api repos/frida/frida/releases/latest --jq .tag_name)"
+            frida_version="${frida_tag#v}"
+          fi
+
+          package_revision="${INPUT_PACKAGE_REVISION:-1}"
+          if [[ ! "$frida_version" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "Unsupported Frida version for automated packaging: $frida_version" >&2
+            exit 1
+          fi
+          if [[ ! "$package_revision" =~ ^[0-9]+$ ]]; then
+            echo "Package revision must be numeric: $package_revision" >&2
+            exit 1
+          fi
+
+          module_version="${frida_version}-${package_revision}"
+          release_tag="v${module_version}"
+
+          IFS=. read -r major minor patch rest <<EOF
+          $frida_version
+          EOF
+          if [ -n "${rest:-}" ]; then
+            echo "Unsupported Frida version for versionCode: $frida_version" >&2
+            exit 1
+          fi
+          version_code=$((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100 + 10#$package_revision))
+
+          echo "frida_tag=$frida_tag" >> "$GITHUB_OUTPUT"
+          echo "frida_version=$frida_version" >> "$GITHUB_OUTPUT"
+          echo "module_version=$module_version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing release
+        id: existing
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Android NDK
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Download Frida Gadget
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          FRIDA_TAG: ${{ steps.version.outputs.frida_tag }}
+          FRIDA_VERSION: ${{ steps.version.outputs.frida_version }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p gadget/arm64-v8a gadget/armeabi-v7a
+          curl -fL "https://github.com/frida/frida/releases/download/${FRIDA_TAG}/frida-gadget-${FRIDA_VERSION}-android-arm64.so.xz" \
+            | xz -dc > "gadget/arm64-v8a/libgadget-${FRIDA_VERSION}.so"
+          curl -fL "https://github.com/frida/frida/releases/download/${FRIDA_TAG}/frida-gadget-${FRIDA_VERSION}-android-arm.so.xz" \
+            | xz -dc > "gadget/armeabi-v7a/libgadget-${FRIDA_VERSION}.so"
+          ln -sfn "libgadget-${FRIDA_VERSION}.so" gadget/arm64-v8a/libgadget.so
+          ln -sfn "libgadget-${FRIDA_VERSION}.so" gadget/armeabi-v7a/libgadget.so
+
+      - name: Prepare changelog
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          MODULE_VERSION: ${{ steps.version.outputs.module_version }}
+          FRIDA_VERSION: ${{ steps.version.outputs.frida_version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("CHANGELOG.md")
+          text = path.read_text()
+          module_version = os.environ["MODULE_VERSION"]
+          frida_version = os.environ["FRIDA_VERSION"]
+          heading = f"## {module_version}"
+
+          if re.search(rf"^##\s+{re.escape(module_version)}\s*$", text, re.MULTILINE):
+              raise SystemExit(0)
+
+          section = f"{heading}\n\n- Rebuild with Frida Gadget {frida_version}.\n"
+          if not text.endswith("\n"):
+              text += "\n"
+          text = text.replace("# Changelog\n", f"# Changelog\n\n{section}", 1)
+          path.write_text(text)
+          PY
+
+      - name: Build release package
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          MODULE_VERSION: ${{ steps.version.outputs.module_version }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          ./release.py "$MODULE_VERSION" "$VERSION_CODE"
+          ./check.sh
+
+      - name: Commit release metadata
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          git add module.prop update.json CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "No release metadata changes to commit."
+          else
+            git commit -m "Prepare $RELEASE_TAG release"
+            git push origin HEAD:main
+          fi
+
+      - name: Publish release
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          MODULE_VERSION: ${{ steps.version.outputs.module_version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > "$RUNNER_TEMP/release-notes.md"
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["MODULE_VERSION"]
+          text = Path("CHANGELOG.md").read_text()
+          match = re.search(rf"^##\s+{re.escape(version)}\s*$", text, re.MULTILINE)
+          if match is None:
+              raise SystemExit(f"CHANGELOG.md missing section: ## {version}")
+          start = match.end()
+          next_match = re.search(r"^##\s+", text[start:], re.MULTILINE)
+          end = start + next_match.start() if next_match else len(text)
+          section = text[start:end].strip()
+          if not section or "TODO" in section:
+              raise SystemExit(f"CHANGELOG.md section is not publishable: ## {version}")
+          print(section)
+          PY
+          gh release create "$RELEASE_TAG" out/zygisk_frida_gadget.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --title "$RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
