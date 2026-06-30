@@ -96,11 +96,16 @@ jobs:
 
       - name: Install Android NDK
         if: steps.existing.outputs.exists != 'true'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "tools platform-tools ndk;${{ env.NDK_VERSION }}"
+
+      - name: Configure Android NDK
+        if: steps.existing.outputs.exists != 'true'
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "ndk;$NDK_VERSION"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Download Frida Gadget
         if: steps.existing.outputs.exists != 'true'
