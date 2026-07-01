@@ -480,7 +480,7 @@ Release builds use strict mode by default and require Gadget binaries plus a Gad
 
 ### Automated Frida releases
 
-The `Frida release` GitHub Actions workflow can publish module builds that track upstream Frida releases. It runs on a daily schedule and can also be started manually from the Actions tab.
+The `Frida release` GitHub Actions workflow can publish module builds that track upstream Frida releases. It runs every two hours and can also be started manually from the Actions tab.
 
 For an upstream Frida version such as `17.15.3`, the workflow publishes module version `17.15.3-1`, where `-1` is the package revision for this module. If the matching GitHub release already exists, the workflow exits without rebuilding.
 

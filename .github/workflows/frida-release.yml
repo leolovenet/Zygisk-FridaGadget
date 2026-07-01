@@ -11,7 +11,7 @@ on:
         required: false
         default: "1"
   schedule:
-    - cron: "43 3,11,19 * * *"
+    - cron: "43 */2 * * *"
 
 permissions:
   contents: write
@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
