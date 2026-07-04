@@ -77,11 +77,15 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
         run: |
           set -euo pipefail
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          if output=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" 2>&1 >/dev/null); then
             echo "Release $RELEASE_TAG already exists."
             echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
+          elif [[ "$output" == *"not found"* || "$output" == *"Not Found"* || "$output" == *"HTTP 404"* ]]; then
+            echo "Release $RELEASE_TAG does not exist yet."
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$output" >&2
+            exit 1
           fi
 
       - name: Checkout
