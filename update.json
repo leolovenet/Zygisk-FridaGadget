@@ -1,6 +1,6 @@
 {
-  "version": "17.15.3-1",
-  "versionCode": 17150301,
-  "zipUrl": "https://github.com/leolovenet/Zygisk-FridaGadget/releases/download/v17.15.3-1/zygisk_frida_gadget-v17.15.3-1.zip",
+  "version": "17.15.4-1",
+  "versionCode": 17150401,
+  "zipUrl": "https://github.com/leolovenet/Zygisk-FridaGadget/releases/download/v17.15.4-1/zygisk_frida_gadget-v17.15.4-1.zip",
   "changelog": "https://raw.githubusercontent.com/leolovenet/Zygisk-FridaGadget/main/CHANGELOG.md"
 }
