@@ -1,5 +1,9 @@
 # Changelog
 
+## 17.16.0-1
+
+- Rebuild with Frida Gadget 17.16.0.
+
 ## 17.15.5-1
 
 - Rebuild with Frida Gadget 17.15.5.
