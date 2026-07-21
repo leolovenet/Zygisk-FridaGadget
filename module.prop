@@ -1,7 +1,7 @@
 id=zygisk_frida_gadget
 name=Zygisk - Frida Gadget
-version=17.16.3-1
-versionCode=17160301
+version=17.16.4-1
+versionCode=17160401
 author=leolovenet
 description=Configurable Zygisk loader for Frida Gadget
 updateJson=https://raw.githubusercontent.com/leolovenet/Zygisk-FridaGadget/main/update.json
